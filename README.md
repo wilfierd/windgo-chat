@@ -52,14 +52,3 @@ npm run dev
 
 The frontend will start on `http://localhost:3000`.
 
-## Available Scripts
-
-**Frontend**
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run start` - Start production server
-- `npm run lint` - Run ESLint
-
-**Backend**
-- `go run main.go` - Start development server
-- `go build` - Build for production
