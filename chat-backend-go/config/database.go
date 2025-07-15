@@ -1,12 +1,14 @@
 package config
 
 import (
+	"chat-backend-go/models"
+	"fmt"
 	"log"
 	"os"
-	"chat-backend-go/models"
+
+	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"github.com/joho/godotenv"
 )
 
 var DB *gorm.DB
@@ -16,11 +18,38 @@ func ConnectDB() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
-	
+
 	// Get database URL from environment or use default
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "host=localhost user=postgres password=postgres dbname=windgo_chat port=5432 sslmode=disable"
+		// Use environment variables or defaults
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5432"
+		}
+
+		user := os.Getenv("DB_USER")
+		if user == "" {
+			user = "postgres"
+		}
+
+		password := os.Getenv("DB_PASSWORD")
+		if password == "" {
+			password = "password"
+		}
+
+		dbname := os.Getenv("DB_NAME")
+		if dbname == "" {
+			dbname = "windgo_chat"
+		}
+
+		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+			host, user, password, dbname, port)
 	}
 
 	var err error
