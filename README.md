@@ -2,29 +2,6 @@
 
 A real-time chat application built with Go backend and Next.js frontend.
 
-## Tech Stack
-
-**Backend**
-- Go
-- Gin framework
-- JWT authentication
-
-**Frontend**
-- Next.js 15
-- TypeScript
-- Tailwind CSS
-- Radix UI
-- Axios
-
-## Project Structure
-
-```
-windgo-chat-app/
-├── chat-backend-go/          # Go backend server
-├── chat-frontend-next/       # Next.js frontend
-└── README.md
-```
-
 ## Getting Started
 
 ### Prerequisites
