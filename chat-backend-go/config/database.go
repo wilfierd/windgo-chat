@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -58,7 +59,20 @@ func ConnectDB() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
+	// Configure connection pool
+	sqlDB, err := DB.DB()
+	if err != nil {
+		log.Fatal("Failed to get underlying sql.DB:", err)
+	}
+
+	// Set connection pool settings
+	sqlDB.SetMaxIdleConns(10)                  // Maximum number of idle connections
+	sqlDB.SetMaxOpenConns(100)                 // Maximum number of open connections
+	sqlDB.SetConnMaxLifetime(time.Hour)        // Connection lifetime
+	sqlDB.SetConnMaxIdleTime(30 * time.Minute) // Maximum idle time
+
 	log.Println("Database connected successfully!")
+	log.Printf("Connection pool configured: MaxIdle=%d, MaxOpen=%d", 10, 100)
 
 	// Auto migrate models
 	err = DB.AutoMigrate(&models.User{}, &models.Room{}, &models.Message{})
