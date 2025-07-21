@@ -88,9 +88,9 @@ func Login(c *fiber.Ctx) error {
 		})
 	}
 
-	// Find user by email
-	var user models.User
-	if err := config.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+	// Find user by email using optimized query
+	user, err := utils.GetUserByEmail(req.Email)
+	if err != nil {
 		return c.Status(401).JSON(fiber.Map{
 			"error": "Invalid credentials",
 		})
@@ -113,7 +113,7 @@ func Login(c *fiber.Ctx) error {
 
 	return c.JSON(AuthResponse{
 		Token: token,
-		User:  user,
+		User:  *user, // Dereference the pointer
 	})
 }
 
