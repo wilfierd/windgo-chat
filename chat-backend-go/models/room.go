@@ -1,3 +1,5 @@
+// Package models defines database models with optimized indexes for the chat application.
+// This file contains the Room model with relationships to messages and performance indexes.
 package models
 
 import (

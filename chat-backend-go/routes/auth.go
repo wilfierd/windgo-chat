@@ -1,3 +1,5 @@
+// Package routes defines HTTP route configurations for the chat application.
+// This file sets up authentication routes including registration, login, and protected endpoints.
 package routes
 
 import (

@@ -1,3 +1,6 @@
+// Package config handles database connection, configuration, and setup.
+// This file manages PostgreSQL connection with optimized connection pooling,
+// environment variable loading, and automatic database migration.
 package config
 
 import (

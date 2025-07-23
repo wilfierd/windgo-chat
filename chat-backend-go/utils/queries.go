@@ -1,3 +1,6 @@
+// Package utils provides optimized database query functions for the chat application.
+// This file contains pre-built, indexed-optimized queries for better performance.
+// These functions leverage the database indexes defined in the models package.
 package utils
 
 import (
