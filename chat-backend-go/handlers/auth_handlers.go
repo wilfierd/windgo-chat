@@ -1,3 +1,6 @@
+// Package handlers contains HTTP request handlers for the chat application.
+// This file handles all authentication-related endpoints including user registration,
+// login, and profile management. Uses optimized database queries for better performance.
 package handlers
 
 import (

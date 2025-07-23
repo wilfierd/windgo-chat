@@ -1,3 +1,5 @@
+// Package models defines database models with optimized indexes for the chat application.
+// This file contains the User model with performance-optimized database indexes.
 package models
 
 import (
