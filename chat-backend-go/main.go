@@ -3,18 +3,28 @@ package main
 import (
 	"chat-backend-go/config"
 	"chat-backend-go/routes"
+	"chat-backend-go/utils"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
 )
 
 func main() {
 	// Initialize database
 	config.ConnectDB()
 
+	// Seed demo users
+	utils.SeedDemoUsers()
+
 	// Create Fiber app
 	app := fiber.New()
+
+	// Logger middleware for debugging
+	app.Use(logger.New(logger.Config{
+		Format: "[${ip}]:${port} ${status} - ${method} ${path}\n",
+	}))
 
 	// CORS middleware
 	app.Use(cors.New(cors.Config{

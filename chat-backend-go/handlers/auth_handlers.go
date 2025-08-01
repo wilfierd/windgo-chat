@@ -16,6 +16,7 @@ type AuthRequest struct {
 	Username string `json:"username" validate:"required"`
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required,min=6"`
+	Role     string `json:"role" validate:"omitempty,oneof=admin user"`
 }
 
 type LoginRequest struct {
@@ -55,10 +56,16 @@ func Register(c *fiber.Ctx) error {
 	}
 
 	// Create user
+	role := req.Role
+	if role == "" {
+		role = "user" // Default role
+	}
+	
 	user := models.User{
 		Username: req.Username,
 		Email:    req.Email,
 		Password: string(hashedPassword),
+		Role:     role,
 	}
 
 	if err := config.DB.Create(&user).Error; err != nil {
@@ -88,6 +95,18 @@ func Login(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid request body",
+		})
+	}
+
+	// Validate request data
+	if req.Email == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Email is required",
+		})
+	}
+	if req.Password == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Password is required",
 		})
 	}
 

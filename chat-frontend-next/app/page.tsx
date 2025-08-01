@@ -142,9 +142,18 @@ export default function Home() {
                 <h2 className="text-3xl font-bold text-gray-900 mb-4">
                   Welcome back, {user?.username}! 👋
                 </h2>
-                <p className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
+                <p className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed mb-8">
                   Your secure messaging platform is ready. Connect with friends, join conversations, and stay in touch with the world.
                 </p>
+                <div className="flex justify-center space-x-4">
+                  <Button
+                    onClick={() => router.push('/chat')}
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                  >
+                    <Chat className="w-5 h-5 mr-2" />
+                    Go to Chat
+                  </Button>
+                </div>
               </div>
             </div>
 
