@@ -13,6 +13,7 @@ type User struct {
 	Username  string         `json:"username" gorm:"unique;not null;index:idx_user_username"`
 	Email     string         `json:"email" gorm:"unique;not null;index:idx_user_email"`
 	Password  string         `json:"-" gorm:"not null"`
+	Role      string         `json:"role" gorm:"not null;default:'user';index:idx_user_role"`
 	CreatedAt time.Time      `json:"created_at" gorm:"index:idx_user_created"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
