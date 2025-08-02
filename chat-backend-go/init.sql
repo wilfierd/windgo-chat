@@ -37,11 +37,11 @@ BEGIN
     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users') THEN
         -- Create demo users with hashed passwords (password: admin123)
         -- Hash: $2a$10$1xCOKVytGk8KJ8r8rQQP4.GkNYyTMLxoLxMPkGSBPqJt2TzDYzr.C
-        INSERT INTO users (username, email, password, created_at, updated_at)
+        INSERT INTO users (username, email, password, role, created_at, updated_at)
         SELECT * FROM (VALUES
-            ('admin', 'admin@windgo.com', '$2a$10$1xCOKVytGk8KJ8r8rQQP4.GkNYyTMLxoLxMPkGSBPqJt2TzDYzr.C', NOW(), NOW()),
-            ('demo_user', 'demo@windgo.com', '$2a$10$1xCOKVytGk8KJ8r8rQQP4.GkNYyTMLxoLxMPkGSBPqJt2TzDYzr.C', NOW(), NOW())
-        ) AS new_users(username, email, password, created_at, updated_at)
+            ('admin', 'admin@windgo.com', '$2a$10$1xCOKVytGk8KJ8r8rQQP4.GkNYyTMLxoLxMPkGSBPqJt2TzDYzr.C', 'admin', NOW(), NOW()),
+            ('demo_user', 'demo@windgo.com', '$2a$10$1xCOKVytGk8KJ8r8rQQP4.GkNYyTMLxoLxMPkGSBPqJt2TzDYzr.C', 'user', NOW(), NOW())
+        ) AS new_users(username, email, password, role, created_at, updated_at)
         WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = new_users.email);
     END IF;
 END $$;
