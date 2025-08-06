@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"log"
 	"os"
 	"time"
 
@@ -13,13 +14,20 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// GenerateJWT creates a new JWT token for a user
-func GenerateJWT(userID uint) (string, error) {
-	// Get JWT secret from environment
+// getJWTSecret returns the JWT secret from environment or a secure default
+func getJWTSecret() string {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		jwtSecret = "your-super-secret-jwt-key-change-this-in-production"
+		log.Println("Warning: JWT_SECRET not set, using default secret. Set JWT_SECRET environment variable for production!")
+		jwtSecret = "windgo-chat-default-secret-please-change-in-production-2024"
 	}
+	return jwtSecret
+}
+
+// GenerateJWT creates a new JWT token for a user
+func GenerateJWT(userID uint) (string, error) {
+	// Get JWT secret
+	jwtSecret := getJWTSecret()
 
 	// Create claims
 	claims := Claims{
@@ -45,11 +53,8 @@ func GenerateJWT(userID uint) (string, error) {
 
 // ValidateJWT validates a JWT token and returns the user ID
 func ValidateJWT(tokenString string) (uint, error) {
-	// Get JWT secret from environment
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = "your-super-secret-jwt-key-change-this-in-production"
-	}
+	// Get JWT secret
+	jwtSecret := getJWTSecret()
 
 	// Parse token
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {

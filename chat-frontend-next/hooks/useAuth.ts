@@ -1,15 +1,7 @@
 "use client";
 import { useState, useEffect } from 'react';
 import api from '@/lib/api';
-
-interface User {
-  id: number;
-  username: string;
-  email: string;
-  role: string;
-  created_at: string;
-  updated_at: string;
-}
+import { User } from '@/lib/types';
 
 export const useAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
