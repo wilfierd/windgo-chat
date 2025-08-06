@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
+import { User } from '@/lib/types';
 import {
   AccountCircle,
   CheckCircle,
@@ -16,14 +17,6 @@ import {
   ExitToApp,
   Dashboard
 } from '@mui/icons-material';
-
-interface User {
-  id: number;
-  username: string;
-  email: string;
-  created_at: string;
-  updated_at: string;
-}
 
 export default function Home() {
   const { isAuthenticated, loading, logout } = useAuth();
