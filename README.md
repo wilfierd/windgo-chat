@@ -1,6 +1,6 @@
 # WindGo Chat App
 
-A real-time chat application built with Go backend and Next.js frontend.
+A real-time chat application built by Go 
 
 ## Getting Started
 
