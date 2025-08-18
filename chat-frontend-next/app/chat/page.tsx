@@ -1,57 +1,103 @@
-"use client";
+"use client"
+
+import type React from "react"
+
+import { useState, useRef, useEffect } from "react"
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { 
-  Search, 
-  Send, 
-  MoreVert, 
-  EmojiEmotions, 
-  AttachFile,
-  Menu,
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  Search,
+  Send,
+  MoreVertical,
+  Phone,
+  Video,
+  Paperclip,
+  ImageIcon,
+  Folder,
+  Smile,
   Settings,
-  ExitToApp,
-  Circle
-} from '@mui/icons-material';
+  User,
+  FileText,
+  Download,
+  X,
+} from "lucide-react"
+import { cn } from "@/lib/utils"
+import Link from "next/link"
+
+interface Chat {
+  id: string
+  name: string
+  lastMessage: string
+  time: string
+  unread?: number
+  avatar: string
+  online?: boolean
+}
+
+interface Attachment {
+  id: string
+  name: string
+  size: string
+  type: "image" | "file" | "video" | "folder"
+  url?: string
+}
 
 interface Message {
-  id: number;
-  user: string;
-  content: string;
-  time: string;
-  isOwn: boolean;
+  id: string
+  content: string
+  time: string
+  sender: "me" | "other"
+  attachments?: Attachment[]
 }
 
-interface ChatRoom {
-  id: number;
-  name: string;
-  lastMessage: string;
-  time: string;
-  unread: number;
-  online: boolean;
-}
+const mockChats: Chat[] = [
+  {
+    id: "1",
+    name: "Sarah Wilson",
+    lastMessage: "Hey, how's the project going?",
+    time: "2m",
+    unread: 2,
+    avatar: "SW",
+    online: true,
+  },
+  { id: "2", name: "Design Team", lastMessage: "The mockups look great!", time: "15m", unread: 5, avatar: "DT" },
+  { id: "3", name: "Alex Chen", lastMessage: "Thanks for the feedback", time: "1h", avatar: "AC", online: true },
+  { id: "4", name: "Marketing", lastMessage: "Campaign launch is tomorrow", time: "2h", avatar: "MK" },
+  { id: "5", name: "David Kim", lastMessage: "Let's schedule a call", time: "3h", avatar: "DK" },
+  { id: "6", name: "Product Team", lastMessage: "New features are ready", time: "1d", avatar: "PT" },
+]
+
+const mockMessages: Message[] = [
+  { id: "1", content: "Hey, how's the project going?", time: "2:30 PM", sender: "other" },
+  { id: "2", content: "It's going well! Just finished the wireframes", time: "2:32 PM", sender: "me" },
+  {
+    id: "3",
+    content: "That's great to hear. Can you share them?",
+    time: "2:33 PM",
+    sender: "other",
+    attachments: [
+      { id: "1", name: "wireframes.pdf", size: "2.4 MB", type: "file" },
+      { id: "2", name: "mockup.png", size: "1.8 MB", type: "image", url: "/placeholder-kxkes.png" },
+    ],
+  },
+  { id: "4", content: "Sure, I'll send them over in a few minutes", time: "2:35 PM", sender: "me" },
+  { id: "5", content: "Perfect! Looking forward to reviewing them", time: "2:36 PM", sender: "other" },
+]
 
 export default function ChatPage() {
   const { isAuthenticated, loading, user, logout } = useAuth();
   const router = useRouter();
-  const [selectedRoom, setSelectedRoom] = useState<number>(1);
-  const [message, setMessage] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Mock data
-  const [rooms] = useState<ChatRoom[]>([
-    { id: 1, name: 'General', lastMessage: 'Welcome to WindGo Chat!', time: '10:30', unread: 0, online: true },
-    { id: 2, name: 'Random', lastMessage: 'Anyone here?', time: '09:45', unread: 2, online: true },
-    { id: 3, name: 'Tech Talk', lastMessage: 'Check out this new framework', time: 'Yesterday', unread: 0, online: false },
-    { id: 4, name: 'Design', lastMessage: 'What do you think about this UI?', time: 'Yesterday', unread: 1, online: true },
-  ]);
-
-  const [messages] = useState<Message[]>([
-    { id: 1, user: 'Admin', content: 'Welcome to WindGo Chat! 🎉', time: '10:30', isOwn: false },
-    { id: 2, user: user?.username || 'You', content: 'Thanks! Happy to be here.', time: '10:31', isOwn: true },
-    { id: 3, user: 'Demo User', content: 'This looks great! Love the design.', time: '10:32', isOwn: false },
-    { id: 4, user: user?.username || 'You', content: 'Agreed! Very clean and modern.', time: '10:33', isOwn: true },
-  ]);
+  const [selectedChat, setSelectedChat] = useState<Chat>(mockChats[0])
+  const [message, setMessage] = useState("")
+  const [messages, setMessages] = useState<Message[]>(mockMessages)
+  const [showAttachments, setShowAttachments] = useState(false)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -59,187 +105,370 @@ export default function ChatPage() {
     }
   }, [isAuthenticated, loading, router]);
 
-  const handleSendMessage = () => {
-    if (message.trim()) {
-      // TODO: Implement message sending
-      console.log('Sending message:', message);
-      setMessage('');
-    }
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-2 text-gray-600 text-sm">Loading...</p>
-        </div>
+      <div className="h-screen bg-white flex items-center justify-center">
+        <div className="text-black">Loading...</div>
       </div>
     );
   }
 
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  const handleSendMessage = () => {
+    if (!message.trim() && selectedFiles.length === 0) return
+
+    const attachments: Attachment[] = selectedFiles.map((file, index) => ({
+      id: `${Date.now()}-${index}`,
+      name: file.name,
+      size: formatFileSize(file.size),
+      type: getFileType(file.type),
+      url: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+    }))
+
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      content: message,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      sender: "me",
+      attachments: attachments.length > 0 ? attachments : undefined,
+    }
+
+    setMessages([...messages, newMessage])
+    setMessage("")
+    setSelectedFiles([])
+    setShowAttachments(false)
+  }
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return "0 Bytes"
+    const k = 1024
+    const sizes = ["Bytes", "KB", "MB", "GB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+  }
+
+  const getFileType = (mimeType: string): "image" | "file" | "video" | "folder" => {
+    if (mimeType.startsWith("image/")) return "image"
+    if (mimeType.startsWith("video/")) return "video"
+    return "file"
+  }
+
+  const handleFileSelect = (type: "file" | "image") => {
+    const input = type === "image" ? imageInputRef.current : fileInputRef.current
+    input?.click()
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    setSelectedFiles((prev) => [...prev, ...files])
+    setShowAttachments(true)
+  }
+
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const renderAttachment = (attachment: Attachment) => {
+    const getIcon = () => {
+      switch (attachment.type) {
+        case "image":
+          return <ImageIcon className="h-4 w-4" />
+        case "video":
+          return <Video className="h-4 w-4" />
+        case "folder":
+          return <Folder className="h-4 w-4" />
+        default:
+          return <FileText className="h-4 w-4" />
+      }
+    }
+
+    return (
+      <div key={attachment.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50 max-w-xs">
+        {attachment.type === "image" && attachment.url ? (
+          <div className="mb-2">
+            <img
+              src={attachment.url || "/placeholder.svg"}
+              alt={attachment.name}
+              className="w-full h-32 object-cover rounded"
+            />
+          </div>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-white rounded border border-gray-200">{getIcon()}</div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-black truncate">{attachment.name}</p>
+            <p className="text-xs text-gray-500">{attachment.size}</p>
+          </div>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-gray-200">
+            <Download className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
+    <div className="h-screen bg-white flex">
+      {/* Hidden file inputs */}
+      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} accept="*/*" />
+      <input ref={imageInputRef} type="file" multiple className="hidden" onChange={handleFileChange} accept="image/*" />
+
+      {/* Chat List Sidebar */}
+      <div className="w-80 border-r border-gray-200 bg-white flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b border-gray-100">
+        <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
-            <h1 className="text-xl font-semibold text-gray-800">WindGo</h1>
-            <div className="flex items-center space-x-2">
-              <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                <Settings className="w-5 h-5 text-gray-600" />
-              </button>
-              <button 
-                onClick={logout}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-              >
-                <ExitToApp className="w-5 h-5 text-gray-600" />
-              </button>
+            <h1 className="text-xl font-semibold text-black">Messages</h1>
+            <div className="flex items-center gap-2">
+              <Link href="/profile">
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-gray-100">
+                  <User className="h-4 w-4 text-gray-600" />
+                </Button>
+              </Link>
+              <Link href="/chat/settings">
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-gray-100">
+                  <Settings className="h-4 w-4 text-gray-600" />
+                </Button>
+              </Link>
             </div>
           </div>
-          
-          {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search chats..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search conversations..."
+              className="pl-10 bg-gray-50 border-gray-200 focus-visible:ring-1 focus-visible:ring-black text-black placeholder:text-gray-400"
             />
           </div>
         </div>
 
         {/* Chat List */}
-        <div className="flex-1 overflow-y-auto">
-          {rooms.map((room) => (
-            <div
-              key={room.id}
-              onClick={() => setSelectedRoom(room.id)}
-              className={`p-4 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${
-                selectedRoom === room.id ? 'bg-blue-50 border-r-2 border-r-blue-500' : ''
-              }`}
-            >
-              <div className="flex items-center space-x-3">
+        <ScrollArea className="flex-1">
+          <div className="p-2">
+            {mockChats.map((chat) => (
+              <div
+                key={chat.id}
+                onClick={() => setSelectedChat(chat)}
+                className={cn(
+                  "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-gray-50",
+                  selectedChat.id === chat.id && "bg-gray-100",
+                )}
+              >
                 <div className="relative">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
-                    {room.name[0]}
-                  </div>
-                  {room.online && (
-                    <Circle className="absolute bottom-0 right-0 w-3 h-3 text-green-400 bg-white rounded-full" />
+                  <Link href={`/profile/${chat.id}`}>
+                    <Avatar className="h-12 w-12 cursor-pointer hover:opacity-80 transition-opacity">
+                      <AvatarFallback className="bg-gray-100 text-black font-medium border border-gray-200">
+                        {chat.avatar}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Link>
+                  {chat.online && (
+                    <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-black border-2 border-white rounded-full" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-gray-900 truncate">{room.name}</h3>
-                    <span className="text-xs text-gray-500">{room.time}</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-medium text-black truncate">{chat.name}</h3>
+                    <span className="text-xs text-gray-500">{chat.time}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-gray-600 truncate">{room.lastMessage}</p>
-                    {room.unread > 0 && (
-                      <span className="bg-blue-500 text-white text-xs rounded-full px-2 py-0.5 min-w-[18px] text-center">
-                        {room.unread}
-                      </span>
-                    )}
-                  </div>
+                  <p className="text-sm text-gray-600 truncate">{chat.lastMessage}</p>
                 </div>
+                {chat.unread && (
+                  <div className="bg-black text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium">
+                    {chat.unread}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* User Info */}
-        <div className="p-4 border-t border-gray-100 bg-gray-50">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center text-white font-semibold">
-              {user?.username?.[0]?.toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-gray-900 truncate">{user?.username}</p>
-              <p className="text-sm text-gray-600 truncate">{user?.role}</p>
-            </div>
+            ))}
           </div>
-        </div>
+        </ScrollArea>
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-white">
+      {/* Chat Window */}
+      <div className="flex-1 flex flex-col">
         {/* Chat Header */}
-        <div className="px-6 py-4 border-b border-gray-100 bg-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
-                {rooms.find(r => r.id === selectedRoom)?.name[0]}
-              </div>
-              <div>
-                <h2 className="font-semibold text-gray-900">
-                  {rooms.find(r => r.id === selectedRoom)?.name}
-                </h2>
-                <p className="text-sm text-gray-500">5 members, 3 online</p>
-              </div>
+        <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Link href={`/profile/${selectedChat.id}`}>
+                <Avatar className="h-10 w-10 cursor-pointer hover:opacity-80 transition-opacity">
+                  <AvatarFallback className="bg-gray-100 text-black font-medium border border-gray-200">
+                    {selectedChat.avatar}
+                  </AvatarFallback>
+                </Avatar>
+              </Link>
+              {selectedChat.online && (
+                <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-black border-2 border-white rounded-full" />
+              )}
             </div>
-            <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-              <MoreVert className="w-5 h-5 text-gray-600" />
-            </button>
+            <div>
+              <h2 className="font-semibold text-black">{selectedChat.name}</h2>
+              <p className="text-xs text-gray-500">{selectedChat.online ? "Active now" : "Last seen 1h ago"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 hover:bg-gray-100">
+              <Phone className="h-4 w-4 text-gray-600" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 hover:bg-gray-100">
+              <Video className="h-4 w-4 text-gray-600" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 hover:bg-gray-100">
+              <MoreVertical className="h-4 w-4 text-gray-600" />
+            </Button>
           </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.isOwn ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs lg:max-w-md ${msg.isOwn ? 'order-2' : 'order-1'}`}>
-                <div className={`px-4 py-2 rounded-2xl ${
-                  msg.isOwn 
-                    ? 'bg-blue-500 text-white rounded-br-md' 
-                    : 'bg-white text-gray-900 rounded-bl-md shadow-sm'
-                }`}>
-                  {!msg.isOwn && (
-                    <p className="text-xs font-medium text-blue-600 mb-1">{msg.user}</p>
-                  )}
-                  <p className="text-sm">{msg.content}</p>
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full p-4 bg-gray-50">
+            <div className="space-y-4">
+              {messages.map((msg) => (
+                <div key={msg.id} className={cn("flex", msg.sender === "me" ? "justify-end" : "justify-start")}>
+                  <div className="max-w-xs lg:max-w-md space-y-2">
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="space-y-2">{msg.attachments.map(renderAttachment)}</div>
+                    )}
+
+                    {msg.content && (
+                      <div
+                        className={cn(
+                          "px-4 py-2 rounded-2xl transition-all duration-200",
+                          msg.sender === "me" ? "bg-black text-white" : "bg-white text-black border border-gray-200",
+                        )}
+                      >
+                        <p className="text-sm">{msg.content}</p>
+                        <p className={cn("text-xs mt-1", msg.sender === "me" ? "text-gray-300" : "text-gray-500")}>
+                          {msg.time}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <p className={`text-xs text-gray-500 mt-1 ${msg.isOwn ? 'text-right' : 'text-left'}`}>
-                  {msg.time}
-                </p>
-              </div>
+              ))}
             </div>
-          ))}
+          </ScrollArea>
         </div>
 
         {/* Message Input */}
-        <div className="p-4 border-t border-gray-100 bg-white">
-          <div className="flex items-end space-x-3">
-            <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-              <AttachFile className="w-5 h-5 text-gray-600" />
-            </button>
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                placeholder="Type a message..."
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-              />
-              <button className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-200 rounded-full transition-colors">
-                <EmojiEmotions className="w-5 h-5 text-gray-600" />
-              </button>
+        <div className="p-4 border-t border-gray-200 bg-white">
+          {(showAttachments || selectedFiles.length > 0) && (
+            <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              {selectedFiles.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium text-black">Selected Files ({selectedFiles.length})</h4>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedFiles([])
+                        setShowAttachments(false)
+                      }}
+                      className="h-6 w-6 p-0 hover:bg-gray-200"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {selectedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-200">
+                        <div className="p-1 bg-gray-100 rounded">
+                          {file.type.startsWith("image/") ? (
+                            <ImageIcon className="h-4 w-4 text-green-600" />
+                          ) : file.type.startsWith("video/") ? (
+                            <Video className="h-4 w-4 text-purple-600" />
+                          ) : (
+                            <FileText className="h-4 w-4 text-blue-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-black truncate">{file.name}</p>
+                          <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          className="h-6 w-6 p-0 hover:bg-gray-200"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-3">
+                  <button
+                    onClick={() => handleFileSelect("file")}
+                    className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
+                      <Paperclip className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <span className="text-xs text-gray-600">File</span>
+                  </button>
+                  <button
+                    onClick={() => handleFileSelect("image")}
+                    className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center">
+                      <ImageIcon className="h-5 w-5 text-green-600" />
+                    </div>
+                    <span className="text-xs text-gray-600">Photo</span>
+                  </button>
+                  <button className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="h-10 w-10 bg-orange-100 rounded-full flex items-center justify-center">
+                      <Folder className="h-5 w-5 text-orange-600" />
+                    </div>
+                    <span className="text-xs text-gray-600">Folder</span>
+                  </button>
+                  <button className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="h-10 w-10 bg-purple-100 rounded-full flex items-center justify-center">
+                      <Video className="h-5 w-5 text-purple-600" />
+                    </div>
+                    <span className="text-xs text-gray-600">Video</span>
+                  </button>
+                </div>
+              )}
             </div>
-            <button
-              onClick={handleSendMessage}
-              disabled={!message.trim()}
-              className="p-3 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full transition-colors"
+          )}
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-10 w-10 p-0 hover:bg-gray-100"
+              onClick={() => setShowAttachments(!showAttachments)}
             >
-              <Send className="w-5 h-5" />
-            </button>
+              <Paperclip className="h-4 w-4 text-gray-600" />
+            </Button>
+
+            <Input
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Type a message..."
+              className="flex-1 bg-gray-50 border-gray-200 focus-visible:ring-1 focus-visible:ring-black text-black placeholder:text-gray-400"
+              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+            />
+
+            <Button variant="ghost" size="sm" className="h-10 w-10 p-0 hover:bg-gray-100">
+              <Smile className="h-4 w-4 text-gray-600" />
+            </Button>
+
+            <Button
+              onClick={handleSendMessage}
+              size="sm"
+              className="h-10 w-10 p-0 bg-black hover:bg-gray-800 text-white transition-colors"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>
     </div>
-  );
+  )
 }
