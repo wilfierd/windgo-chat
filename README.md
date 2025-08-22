@@ -1,5 +1,5 @@
 # WindGo Chat App
-<p align="right">
+<p align="left">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go">
   <img src="https://img.shields.io/badge/Node.js-18+-339933?logo=node.js">
   <img src="https://img.shields.io/badge/Next.js-React-000?logo=next.js">
