@@ -90,17 +90,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
         }
     }, [isAuthenticated, loading, router]);
 
-    if (loading) {
-        return (
-            <div className="h-screen bg-white flex items-center justify-center">
-                <div className="text-black">Loading...</div>
-            </div>
-        );
-    }
-
-    if (!isAuthenticated) {
-        return null;
-    }
+    if (loading) return <div className="h-screen bg-white flex items-center justify-center"><div className="text-black">Loading...</div></div>;
+    if (!isAuthenticated) return null;
 
     return (
         <div className="min-h-screen bg-white">

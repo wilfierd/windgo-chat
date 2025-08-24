@@ -28,11 +28,9 @@ export default function Home() {
     if (!loading && !isAuthenticated) {
       router.push('/login');
     }
-  }, [isAuthenticated, loading, router]);
-
-  useEffect(() => {
-    const fetchProfile = async () => {
-      if (isAuthenticated) {
+    
+    if (isAuthenticated) {
+      const fetchProfile = async () => {
         try {
           const response = await api.get('/auth/profile');
           setUser(response.data);
@@ -41,31 +39,10 @@ export default function Home() {
         } finally {
           setLoadingProfile(false);
         }
-      }
-    };
-
-    fetchProfile();
-  }, [isAuthenticated]);
-
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-          <div className="text-gray-600">Loading...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null; // Will redirect to login
-  }
-
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
-  };
+      };
+      fetchProfile();
+    }
+  }, [isAuthenticated, loading, router]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -75,8 +52,22 @@ export default function Home() {
     });
   };
 
+  const GRADIENTS = {
+    primary: 'from-blue-600 to-purple-600',
+    primaryHover: 'from-blue-700 to-purple-700',
+    background: 'from-slate-50 via-blue-50 to-indigo-50'
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100"><div className="flex flex-col items-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div><div className="text-gray-600">Loading...</div></div></div>;
+  if (!isAuthenticated) return null;
+
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+    <div className={`min-h-screen bg-gradient-to-br ${GRADIENTS.background}`}>
       {/* Modern Header */}
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -141,7 +132,7 @@ export default function Home() {
                 <div className="flex justify-center space-x-4">
                   <Button
                     onClick={() => router.push('/chat')}
-                    className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                    className={`bg-gradient-to-r ${GRADIENTS.primary} hover:${GRADIENTS.primaryHover} text-white px-8 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200`}
                   >
                     <Chat className="w-5 h-5 mr-2" />
                     Go to Chat

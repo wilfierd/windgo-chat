@@ -29,21 +29,14 @@ export default function ChatSettingsPage() {
         }
     }, [isAuthenticated, loading, router]);
 
-    if (loading) {
-        return (
-            <div className="h-screen bg-white flex items-center justify-center">
-                <div className="text-black">Loading...</div>
-            </div>
-        );
-    }
-
-    if (!isAuthenticated) {
-        return null;
-    }
+    if (loading) return <div className="h-screen bg-white flex items-center justify-center"><div className="text-black">Loading...</div></div>;
+    if (!isAuthenticated) return null;
 
     const updateSetting = (key: string, value: boolean) => {
         setSettings((prev) => ({ ...prev, [key]: value }))
     }
+
+    const getInitials = (name: string) => name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U';
 
     return (
         <div className="min-h-screen bg-white">
@@ -71,7 +64,7 @@ export default function ChatSettingsPage() {
                             <div className="relative">
                                 <Avatar className="h-16 w-16 border-2 border-gray-200">
                                     <AvatarFallback className="bg-gray-100 text-black text-xl font-medium">
-                                        {user?.username?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'}
+                                        {getInitials(user?.username || 'User')}
                                     </AvatarFallback>
                                 </Avatar>
                                 <Button
