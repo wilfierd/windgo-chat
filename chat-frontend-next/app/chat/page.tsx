@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef, useEffect } from "react"
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
@@ -105,17 +104,8 @@ export default function ChatPage() {
     }
   }, [isAuthenticated, loading, router]);
 
-  if (loading) {
-    return (
-      <div className="h-screen bg-white flex items-center justify-center">
-        <div className="text-black">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null;
-  }
+  if (loading) return <div className="h-screen bg-white flex items-center justify-center"><div className="text-black">Loading...</div></div>;
+  if (!isAuthenticated) return null;
 
   const handleSendMessage = () => {
     if (!message.trim() && selectedFiles.length === 0) return

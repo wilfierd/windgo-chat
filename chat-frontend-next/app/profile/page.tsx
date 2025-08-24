@@ -26,9 +26,7 @@ export default function ProfilePage() {
         if (!loading && !isAuthenticated) {
             router.push('/login');
         }
-    }, [isAuthenticated, loading, router]);
-
-    useEffect(() => {
+        
         if (user) {
             setProfile(prev => ({
                 ...prev,
@@ -36,19 +34,12 @@ export default function ProfilePage() {
                 email: user.email || prev.email,
             }));
         }
-    }, [user]);
+    }, [isAuthenticated, loading, router, user]);
 
-    if (loading) {
-        return (
-            <div className="h-screen bg-white flex items-center justify-center">
-                <div className="text-black">Loading...</div>
-            </div>
-        );
-    }
+    if (loading) return <div className="h-screen bg-white flex items-center justify-center"><div className="text-black">Loading...</div></div>;
+    if (!isAuthenticated) return null;
 
-    if (!isAuthenticated) {
-        return null;
-    }
+    const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase();
 
     return (
         <div className="min-h-screen bg-white">
@@ -80,7 +71,7 @@ export default function ProfilePage() {
                         <div className="relative">
                             <Avatar className="h-24 w-24 border-2 border-gray-200">
                                 <AvatarFallback className="bg-gray-100 text-black text-2xl font-medium">
-                                    {profile.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                                    {getInitials(profile.name)}
                                 </AvatarFallback>
                             </Avatar>
                             {isEditing && (
