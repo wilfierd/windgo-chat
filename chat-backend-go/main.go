@@ -15,8 +15,9 @@ func main() {
 	// Initialize database
 	config.ConnectDB()
 
-	// Seed demo users
+	// Seed demo users and rooms
 	utils.SeedDemoUsers()
+	utils.SeedDemoRooms()
 
 	// Create Fiber app
 	app := fiber.New()
@@ -50,6 +51,7 @@ func main() {
 
 	// Setup routes
 	routes.SetupAuthRoutes(app)
+	routes.MessageRoutes(app)
 
 	log.Println("Server starting on :8080")
 	log.Fatal(app.Listen(":8080"))
