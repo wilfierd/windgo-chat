@@ -48,22 +48,60 @@ func SeedDemoUsers() {
 		}
 	}
 
-	// Create additional test user
-	var testUser models.User
-	err = config.DB.Where("email = ?", "test@windgo.com").First(&testUser).Error
-	if err != nil {
-		// Create test user
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("test123"), bcrypt.DefaultCost)
-		test := models.User{
-			Username: "testuser",
-			Email:    "test@windgo.com",
-			Password: string(hashedPassword),
-			Role:     "user",
+	// Create additional test users
+	testUsers := []struct {
+		Username string
+		Email    string
+		Password string
+	}{
+		{"testuser", "test@windgo.com", "test123"},
+		{"alice", "alice@windgo.com", "alice123"},
+		{"bob", "bob@windgo.com", "bob123"},
+	}
+
+	for _, userData := range testUsers {
+		var user models.User
+		err = config.DB.Where("email = ?", userData.Email).First(&user).Error
+		if err != nil {
+			hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(userData.Password), bcrypt.DefaultCost)
+			newUser := models.User{
+				Username: userData.Username,
+				Email:    userData.Email,
+				Password: string(hashedPassword),
+				Role:     "user",
+			}
+			if err := config.DB.Create(&newUser).Error; err != nil {
+				log.Printf("Failed to create user %s: %v", userData.Username, err)
+			} else {
+				log.Printf("User created: %s / %s", userData.Email, userData.Password)
+			}
 		}
-		if err := config.DB.Create(&test).Error; err != nil {
-			log.Printf("Failed to create test user: %v", err)
-		} else {
-			log.Println("Test user created: test@windgo.com / test123")
+	}
+}
+
+// SeedDemoRooms creates demo chat rooms if they don't exist
+func SeedDemoRooms() {
+	defaultRooms := []struct {
+		Name string
+	}{
+		{"General"},
+		{"Random"},
+		{"Tech Talk"},
+		{"Gaming"},
+	}
+
+	for _, roomData := range defaultRooms {
+		var room models.Room
+		err := config.DB.Where("name = ?", roomData.Name).First(&room).Error
+		if err != nil {
+			newRoom := models.Room{
+				Name: roomData.Name,
+			}
+			if err := config.DB.Create(&newRoom).Error; err != nil {
+				log.Printf("Failed to create room %s: %v", roomData.Name, err)
+			} else {
+				log.Printf("Room created: %s", roomData.Name)
+			}
 		}
 	}
 }
