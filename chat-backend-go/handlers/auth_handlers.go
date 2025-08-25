@@ -66,6 +66,7 @@ func Register(c *fiber.Ctx) error {
 		Email:    req.Email,
 		Password: string(hashedPassword),
 		Role:     role,
+		AuthType: "local",
 	}
 
 	if err := config.DB.Create(&user).Error; err != nil {
@@ -74,8 +75,16 @@ func Register(c *fiber.Ctx) error {
 		})
 	}
 
+	// Generate device ID for web login
+	deviceID, err := utils.GenerateDeviceID()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to generate device ID",
+		})
+	}
+
 	// Generate JWT token
-	token, err := utils.GenerateJWT(user.ID)
+	token, err := utils.GenerateJWT(user.ID, deviceID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to generate token",
@@ -125,8 +134,16 @@ func Login(c *fiber.Ctx) error {
 		})
 	}
 
+	// Generate device ID for web login
+	deviceID, err := utils.GenerateDeviceID()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to generate device ID",
+		})
+	}
+
 	// Generate JWT token
-	token, err := utils.GenerateJWT(user.ID)
+	token, err := utils.GenerateJWT(user.ID, deviceID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to generate token",

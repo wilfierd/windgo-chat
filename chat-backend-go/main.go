@@ -51,6 +51,7 @@ func main() {
 
 	// Setup routes
 	routes.SetupAuthRoutes(app)
+	routes.SetupGitHubAuthRoutes(app)
 	routes.MessageRoutes(app)
 
 	log.Println("Server starting on :8080")

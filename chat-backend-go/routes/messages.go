@@ -14,7 +14,7 @@ func MessageRoutes(app *fiber.App) {
 	api.Get("/rooms", handlers.GetRooms)
 
 	// Protected routes (require authentication)
-	protected := api.Use(middleware.AuthRequired())
+	protected := api.Use(middleware.AuthMiddleware)
 	protected.Post("/messages", handlers.SendMessage)
 	protected.Get("/rooms/:roomId/messages", handlers.GetMessages)
 }

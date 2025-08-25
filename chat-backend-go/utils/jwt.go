@@ -10,7 +10,8 @@ import (
 )
 
 type Claims struct {
-	UserID uint `json:"user_id"`
+	UserID   uint   `json:"user_id"`
+	DeviceID string `json:"device_id"`
 	jwt.RegisteredClaims
 }
 
@@ -24,14 +25,15 @@ func getJWTSecret() string {
 	return jwtSecret
 }
 
-// GenerateJWT creates a new JWT token for a user
-func GenerateJWT(userID uint) (string, error) {
+// GenerateJWT creates a new JWT token for a user and device
+func GenerateJWT(userID uint, deviceID string) (string, error) {
 	// Get JWT secret
 	jwtSecret := getJWTSecret()
 
 	// Create claims
 	claims := Claims{
-		UserID: userID,
+		UserID:   userID,
+		DeviceID: deviceID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Token expires in 24 hours
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -51,8 +53,8 @@ func GenerateJWT(userID uint) (string, error) {
 	return tokenString, nil
 }
 
-// ValidateJWT validates a JWT token and returns the user ID
-func ValidateJWT(tokenString string) (uint, error) {
+// ValidateJWT validates a JWT token and returns the user ID and device ID
+func ValidateJWT(tokenString string) (uint, string, error) {
 	// Get JWT secret
 	jwtSecret := getJWTSecret()
 
@@ -66,15 +68,15 @@ func ValidateJWT(tokenString string) (uint, error) {
 	})
 
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	// Extract claims
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		return claims.UserID, nil
+		return claims.UserID, claims.DeviceID, nil
 	}
 
-	return 0, errors.New("invalid token")
+	return 0, "", errors.New("invalid token")
 }
 
 // ExtractUserID extracts user ID from Authorization header
@@ -84,10 +86,21 @@ func ExtractUserID(authHeader string) (uint, error) {
 	}
 
 	tokenString := authHeader[7:]
+	userID, _, err := ValidateJWT(tokenString)
+	return userID, err
+}
+
+// ExtractUserAndDevice extracts user ID and device ID from Authorization header
+func ExtractUserAndDevice(authHeader string) (uint, string, error) {
+	if len(authHeader) < 7 || authHeader[:7] != "Bearer " {
+		return 0, "", errors.New("invalid authorization header format")
+	}
+
+	tokenString := authHeader[7:]
 	return ValidateJWT(tokenString)
 }
 
-// RefreshToken generates a new token for an existing user
-func RefreshToken(userID uint) (string, error) {
-	return GenerateJWT(userID)
+// RefreshToken generates a new token for an existing user and device
+func RefreshToken(userID uint, deviceID string) (string, error) {
+	return GenerateJWT(userID, deviceID)
 }

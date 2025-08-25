@@ -20,13 +20,14 @@ func SetupAuthRoutes(app *fiber.App) {
 	auth.Post("/login", handlers.Login)
 
 	// Protected routes (authentication required)
-	auth.Get("/profile", middleware.AuthRequired(), handlers.GetProfile)
-	auth.Post("/refresh", middleware.AuthRequired(), func(c *fiber.Ctx) error {
-		// Get user ID from middleware
+	auth.Get("/profile", middleware.AuthMiddleware, handlers.GetProfile)
+	auth.Post("/refresh", middleware.AuthMiddleware, func(c *fiber.Ctx) error {
+		// Get user ID and device ID from middleware
 		userID := c.Locals("userID").(uint)
+		deviceID := c.Locals("deviceID").(string)
 
 		// Generate new token
-		token, err := utils.GenerateJWT(userID)
+		token, err := utils.GenerateJWT(userID, deviceID)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"error": "Failed to refresh token",
