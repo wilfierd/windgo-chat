@@ -51,37 +51,6 @@ docker-compose up
 
 ---
 
-### Frontend Setup
-
-```bash
-cd chat-frontend-next
-npm install
-npm run dev
-```
-The frontend will start on `http://localhost:3000`.
-
----
-
-## Integration & Usage
-
-- The frontend communicates with the backend API at `http://localhost:8080`.
-- Authentication is handled via JWT (see `utils/jwt.go` and `middleware/auth.go`).
-- Main pages:
-  - `/chat` — chat room UI
-  - `/login` — authentication
-  - `/profile` — user profile
-- Main components:
-  - `LoginForm.tsx`, UI elements in `components/ui/`
-
----
-
-## Contributing & Testing
-
-- No errors or warnings found in the current codebase.
-- To contribute, fork the repo and submit a PR.
-- Add environment variables as needed for DB and JWT secrets.
-
----
 
 ## License
 
