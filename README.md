@@ -77,7 +77,30 @@ Set environment variables (or copy `chat-backend-go/.env.example` to `chat-backe
 The backend listens on `http://localhost:<PORT>` and exposes REST APIs for auth, rooms, and messages.
 
 
+## Authentication
+
+- Flow: email/password login or registration returns a JWT; include it as `Authorization: Bearer <token>` for protected routes.
+- Token: signed with `JWT_SECRET`, expires in 24h.
+- Endpoints:
+  - `POST /api/auth/register`: body `{ username, email, password, role? }` → returns `{ token, user }`.
+  - `POST /api/auth/login`: body `{ email, password }` → returns `{ token, user }`.
+  - `GET /api/auth/profile`: requires Bearer token → returns current user.
+  - `POST /api/auth/refresh`: requires Bearer token → returns new `{ token }`.
+
+Example:
+
+```bash
+# Login
+curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"demo@windgo.com","password":"password"}'
+
+# Profile (replace TOKEN)
+curl -sS http://localhost:8080/api/auth/profile \
+  -H 'Authorization: Bearer TOKEN'
+```
+
+
 ## License
 
 MIT
-

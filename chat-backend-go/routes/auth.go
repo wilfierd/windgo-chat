@@ -12,15 +12,19 @@ import (
 
 // SetupAuthRoutes sets up authentication related routes
 func SetupAuthRoutes(app *fiber.App) {
-	// Create auth group
-	auth := app.Group("/api/auth")
+    // Create auth group
+    auth := app.Group("/api/auth")
 
-	// Public routes (no authentication required)
-	auth.Post("/register", handlers.Register)
-	auth.Post("/login", handlers.Login)
+    // Public routes (no authentication required)
+    auth.Post("/register", handlers.Register)
+    auth.Post("/login", handlers.Login)
+    // OAuth with GitHub
+    auth.Get("/github/login", handlers.GitHubLogin)
+    auth.Get("/github/callback", handlers.GitHubCallback)
+    auth.Get("/github/status", handlers.GitHubConfigStatus)
 
-	// Protected routes (authentication required)
-	auth.Get("/profile", middleware.AuthRequired(), handlers.GetProfile)
+    // Protected routes (authentication required)
+    auth.Get("/profile", middleware.AuthRequired(), handlers.GetProfile)
 	auth.Post("/refresh", middleware.AuthRequired(), func(c *fiber.Ctx) error {
 		// Get user ID from middleware
 		userID := c.Locals("userID").(uint)
