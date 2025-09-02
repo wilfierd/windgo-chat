@@ -18,10 +18,14 @@ func SetupAuthRoutes(app *fiber.App) {
     // Public routes (no authentication required)
     auth.Post("/register", handlers.Register)
     auth.Post("/login", handlers.Login)
-    // OAuth with GitHub
+    // OAuth with GitHub (web)
     auth.Get("/github/login", handlers.GitHubLogin)
     auth.Get("/github/callback", handlers.GitHubCallback)
     auth.Get("/github/status", handlers.GitHubConfigStatus)
+
+    // OAuth with GitHub (Device Flow for CLI)
+    auth.Post("/github/device/start", handlers.GitHubDeviceStart)
+    auth.Post("/github/device/poll", handlers.GitHubDevicePoll)
 
     // Protected routes (authentication required)
     auth.Get("/profile", middleware.AuthRequired(), handlers.GetProfile)
