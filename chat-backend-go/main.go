@@ -1,38 +1,43 @@
 package main
 
 import (
-	"chat-backend-go/config"
-	"chat-backend-go/routes"
-	"chat-backend-go/utils"
-	"log"
+    "chat-backend-go/config"
+    "chat-backend-go/routes"
+    "chat-backend-go/utils"
+    "log"
+    "os"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
+    "github.com/gofiber/fiber/v2"
+    "github.com/gofiber/fiber/v2/middleware/cors"
+    "github.com/gofiber/fiber/v2/middleware/logger"
 )
 
 func main() {
-	// Initialize database
-	config.ConnectDB()
+    // Initialize database
+    config.ConnectDB()
 
 	// Seed demo users and rooms
 	utils.SeedDemoUsers()
 	utils.SeedDemoRooms()
 
-	// Create Fiber app
-	app := fiber.New()
+    // Create Fiber app
+    app := fiber.New()
 
 	// Logger middleware for debugging
 	app.Use(logger.New(logger.Config{
 		Format: "[${ip}]:${port} ${status} - ${method} ${path}\n",
 	}))
 
-	// CORS middleware
-	app.Use(cors.New(cors.Config{
-		AllowOrigins: "http://localhost:3000",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, PUT, DELETE",
-	}))
+    // CORS middleware
+    corsOrigin := os.Getenv("CORS_ORIGIN")
+    if corsOrigin == "" {
+        corsOrigin = "http://localhost:3000"
+    }
+    app.Use(cors.New(cors.Config{
+        AllowOrigins: corsOrigin,
+        AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+        AllowMethods: "GET, POST, PUT, DELETE",
+    }))
 
 	// Basic route
 	app.Get("/", func(c *fiber.Ctx) error {
@@ -53,6 +58,11 @@ func main() {
 	routes.SetupAuthRoutes(app)
 	routes.MessageRoutes(app)
 
-	log.Println("Server starting on :8080")
-	log.Fatal(app.Listen(":8080"))
+    // Read port from environment (default 8080)
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "8080"
+    }
+    log.Printf("Server starting on :%s (CORS_ORIGIN=%s)", port, corsOrigin)
+    log.Fatal(app.Listen(":" + port))
 }
