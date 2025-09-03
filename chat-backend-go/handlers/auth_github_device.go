@@ -3,12 +3,9 @@ package handlers
 import (
     "chat-backend-go/config"
     "chat-backend-go/utils"
-    "context"
     "encoding/json"
-    "errors"
     "net/http"
     "net/url"
-    "strconv"
     "strings"
     "time"
 
@@ -160,4 +157,3 @@ func GitHubDevicePoll(c *fiber.Ctx) error {
 
     return c.Status(fiber.StatusRequestTimeout).JSON(fiber.Map{"error": "timeout"})
 }
-

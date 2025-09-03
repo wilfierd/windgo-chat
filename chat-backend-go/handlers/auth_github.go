@@ -11,7 +11,6 @@ import (
     "errors"
     "fmt"
     "io"
-    "log"
     "net/http"
     "os"
     "strings"
@@ -262,4 +261,3 @@ func GitHubConfigStatus(c *fiber.Ctx) error {
     }
     return c.JSON(fiber.Map{"configured": true})
 }
-
