@@ -63,6 +63,17 @@ The web frontend has moved to a separate repository: https://github.com/wilfierd
 - Use that repository if you prefer a browser UI. Follow its README for setup and commands.
 - This repository will evolve toward a CLI chat client; the web UI remains available via `wildgo-Fe`.
 
+### CLI (Preview)
+
+An experimental terminal client now lives in `cli/`:
+
+```bash
+cd cli
+go run ./cmd/windgo
+```
+
+Set `WINDGO_BASE_URL` if your API is not on `http://localhost:8080`. Auth tokens are stored in `~/.config/windgo/credentials.json` (override with `WINDGO_CONFIG_DIR`).
+
 ---
 
 ## Configuration
@@ -86,6 +97,7 @@ The backend listens on `http://localhost:<PORT>` and exposes REST APIs for auth,
   - `POST /api/auth/login`: body `{ email, password }` → returns `{ token, user }`.
   - `GET /api/auth/profile`: requires Bearer token → returns current user.
   - `POST /api/auth/refresh`: requires Bearer token → returns new `{ token }`.
+  - `GET /api/v1/users`: requires Bearer token → returns other users for the `/chat` directory (optional `?search=`).
 
 Example:
 
