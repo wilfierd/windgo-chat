@@ -250,10 +250,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case stateEmailLogin:
 		var cmds []tea.Cmd
-		m.emailInput, msg := m.emailInput.Update(msg)
-		cmds = append(cmds, msg)
-		m.passwordInput, msg = m.passwordInput.Update(msg)
-		cmds = append(cmds, msg)
+		var cmd tea.Cmd
+		m.emailInput, cmd = m.emailInput.Update(msg)
+		cmds = append(cmds, cmd)
+		m.passwordInput, cmd = m.passwordInput.Update(msg)
+		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}
 
