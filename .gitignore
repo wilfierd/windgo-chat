@@ -71,6 +71,9 @@ temp/
 .npm/
 .yarn/
 .gocache/
+cli/.cache/
+cli/.modcache/
+cli/.gomodcache/
 
 # TypeScript
 *.tsbuildinfo
