@@ -99,3 +99,6 @@ out/
 # Testing
 test-results/
 playwright-report/
+
+# Agent docs
+AGENTS.md
