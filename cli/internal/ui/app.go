@@ -176,8 +176,16 @@ func saveCredentialsCmd(resp *api.AuthResponse) tea.Cmd {
 	}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		keyMsg tea.KeyMsg
+		isKey  bool
+	)
+	if km, ok := message.(tea.KeyMsg); ok {
+		keyMsg = km
+		isKey = true
+	}
+	switch msg := message.(type) {
 	case storedCredsMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -243,17 +251,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
-		return m.handleKey(msg)
+	}
+
+	if isKey {
+		var cmds []tea.Cmd
+		if m.state == stateEmailLogin {
+			skipInputs := false
+			switch keyMsg.String() {
+			case "enter", "tab", "shift+tab", "esc":
+				skipInputs = true
+			}
+			if !skipInputs {
+				var cmd tea.Cmd
+				m.emailInput, cmd = m.emailInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.passwordInput, cmd = m.passwordInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		var keyCmd tea.Cmd
+		m, keyCmd = m.handleKey(keyMsg)
+		if keyCmd != nil {
+			cmds = append(cmds, keyCmd)
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	switch m.state {
 	case stateEmailLogin:
 		var cmds []tea.Cmd
 		var cmd tea.Cmd
-		m.emailInput, cmd = m.emailInput.Update(msg)
+		m.emailInput, cmd = m.emailInput.Update(message)
 		cmds = append(cmds, cmd)
-		m.passwordInput, cmd = m.passwordInput.Update(msg)
+		m.passwordInput, cmd = m.passwordInput.Update(message)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}
@@ -261,7 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch m.state {
 	case stateLoginMenu:
 		switch msg.String() {
