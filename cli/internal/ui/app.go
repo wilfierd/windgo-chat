@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -56,6 +58,26 @@ type Model struct {
 	passwordInput textinput.Model
 
 	deviceInfo *api.DeviceStartResponse
+}
+
+// openBrowser opens the specified URL in the user's default browser
+func openBrowser(url string) error {
+	var cmd string
+	var args []string
+
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start", url}
+	case "darwin":
+		cmd = "open"
+		args = []string{url}
+	default: // "linux", "freebsd", "openbsd", "netbsd"
+		cmd = "xdg-open"
+		args = []string{url}
+	}
+
+	return exec.Command(cmd, args...).Start()
 }
 
 func NewModel(client *api.Client) Model {
@@ -220,7 +242,20 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.deviceInfo = msg.resp
 		m.state = stateDeviceSetup
-		m.status = "Enter the code in your browser, then press Enter to continue."
+		// Try to automatically open the browser
+		if m.deviceInfo.VerificationURIComplete != "" {
+			if err := openBrowser(m.deviceInfo.VerificationURIComplete); err == nil {
+				m.status = "Browser opened! Authorize the app, then press Enter to continue."
+			} else {
+				m.status = "Enter the code in your browser, then press Enter to continue."
+			}
+		} else {
+			if err := openBrowser(m.deviceInfo.VerificationURI); err == nil {
+				m.status = "Browser opened! Enter the code, then press Enter to continue."
+			} else {
+				m.status = "Enter the code in your browser, then press Enter to continue."
+			}
+		}
 		return m, nil
 
 	case authSuccessMsg:
@@ -296,6 +331,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Handle Ctrl+C globally for all states
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+
 	switch m.state {
 	case stateLoginMenu:
 		switch msg.String() {
