@@ -4,6 +4,7 @@ import (
     "chat-backend-go/config"
     "chat-backend-go/utils"
     "encoding/json"
+    "log"
     "net/http"
     "net/url"
     "strings"
@@ -114,23 +115,30 @@ func GitHubDevicePoll(c *fiber.Ctx) error {
         }
         resp.Body.Close()
 
-        if pr.AccessToken != "" {
-            // We have a GitHub user; fetch profile and issue app JWT
-            tok := &oauth2.Token{AccessToken: pr.AccessToken}
-            ghUser, primaryEmail, err := fetchGitHubUser(tok)
-            if err != nil {
-                return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
-            }
-            user, err := linkOrCreateUserFromGitHub(ghUser, primaryEmail)
-            if err != nil {
-                return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-            }
-            appToken, err := utils.GenerateJWT(user.ID)
-            if err != nil {
-                return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
-            }
-            return c.JSON(AuthResponse{Token: appToken, User: *user})
-        }
+		if pr.AccessToken != "" {
+			log.Println("GitHub Device Flow: Received access token, fetching user profile")
+			// We have a GitHub user; fetch profile and issue app JWT
+			tok := &oauth2.Token{AccessToken: pr.AccessToken}
+			ghUser, primaryEmail, err := fetchGitHubUser(tok)
+			if err != nil {
+				log.Printf("GitHub Device Flow: Error fetching user profile: %v", err)
+				return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+			}
+			log.Printf("GitHub Device Flow: Fetched user profile, email: %s", primaryEmail)
+			user, err := linkOrCreateUserFromGitHub(ghUser, primaryEmail)
+			if err != nil {
+				log.Printf("GitHub Device Flow: Error creating/linking user: %v", err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
+			log.Printf("GitHub Device Flow: User processed successfully, ID: %d", user.ID)
+			appToken, err := utils.GenerateJWT(user.ID)
+			if err != nil {
+				log.Printf("GitHub Device Flow: Error generating JWT: %v", err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
+			}
+			log.Printf("GitHub Device Flow: JWT generated successfully for user ID: %d", user.ID)
+			return c.JSON(AuthResponse{Token: appToken, User: *user})
+		}
 
         switch pr.Error {
         case "authorization_pending":

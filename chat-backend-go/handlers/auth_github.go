@@ -11,6 +11,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "log"
     "net/http"
     "os"
     "strings"
@@ -181,53 +182,64 @@ func fetchGitHubUser(tok *oauth2.Token) (map[string]any, string, error) {
 
 // linkOrCreateUserFromGitHub links an existing user or creates a new one from GitHub data.
 func linkOrCreateUserFromGitHub(ghUser map[string]any, email string) (*models.User, error) {
-    var user models.User
+	var user models.User
 
-    // Extract fields
-    var ghID string
-    switch v := ghUser["id"].(type) {
-    case float64:
-        ghID = fmt.Sprintf("%0.f", v)
-    case string:
-        ghID = v
-    default:
-        ghID = fmt.Sprint(v)
-    }
-    login, _ := ghUser["login"].(string)
-    avatar, _ := ghUser["avatar_url"].(string)
+	// Extract fields
+	var ghID string
+	switch v := ghUser["id"].(type) {
+	case float64:
+		ghID = fmt.Sprintf("%0.f", v)
+	case string:
+		ghID = v
+	default:
+		ghID = fmt.Sprint(v)
+	}
+	login, _ := ghUser["login"].(string)
+	avatar, _ := ghUser["avatar_url"].(string)
 
-    // If user exists with this GitHubID, return it
-    if err := config.DB.Where("git_hub_id = ?", ghID).First(&user).Error; err == nil {
-        // Update avatar/provider if changed
-        updates := map[string]any{"avatar_url": avatar, "provider": "github"}
-        _ = config.DB.Model(&user).Updates(updates).Error
-        return &user, nil
-    }
+	log.Printf("GitHub OAuth: Processing user - ID: %s, Login: %s, Email: %s", ghID, login, email)
 
-    // Else try to find by email
-    if err := config.DB.Where("email = ?", email).First(&user).Error; err == nil {
-        updates := map[string]any{"git_hub_id": ghID, "avatar_url": avatar, "provider": "github"}
-        if err := config.DB.Model(&user).Updates(updates).Error; err != nil {
-            return nil, err
-        }
-        return &user, nil
-    }
+	// If user exists with this GitHubID, return it
+	if err := config.DB.Where("git_hub_id = ?", ghID).First(&user).Error; err == nil {
+		log.Printf("GitHub OAuth: Found existing user by GitHub ID: %d", user.ID)
+		// Update avatar/provider if changed
+		updates := map[string]any{"avatar_url": avatar, "provider": "github"}
+		if err := config.DB.Model(&user).Updates(updates).Error; err != nil {
+			log.Printf("GitHub OAuth: Warning - failed to update existing user: %v", err)
+		}
+		return &user, nil
+	}
 
-    // Create new user
-    // Ensure unique username
-    baseUsername := login
-    if baseUsername == "" {
-        baseUsername = strings.Split(email, "@")[0]
-    }
-    username := baseUsername
-    for i := 0; i < 10; i++ {
-        var count int64
-        config.DB.Model(&models.User{}).Where("username = ?", username).Count(&count)
-        if count == 0 {
-            break
-        }
-        username = fmt.Sprintf("%s%d", baseUsername, i+1)
-    }
+	// Else try to find by email
+	if err := config.DB.Where("email = ?", email).First(&user).Error; err == nil {
+		log.Printf("GitHub OAuth: Found existing user by email: %d, linking GitHub account", user.ID)
+		updates := map[string]any{"git_hub_id": ghID, "avatar_url": avatar, "provider": "github"}
+		if err := config.DB.Model(&user).Updates(updates).Error; err != nil {
+			log.Printf("GitHub OAuth: Error linking GitHub account to existing user: %v", err)
+			return nil, err
+		}
+		return &user, nil
+	}
+
+	// Create new user
+	log.Printf("GitHub OAuth: Creating new user for email: %s", email)
+	// Ensure unique username
+	baseUsername := login
+	if baseUsername == "" {
+		baseUsername = strings.Split(email, "@")[0]
+	}
+	username := baseUsername
+	for i := 0; i < 10; i++ {
+		var count int64
+		if err := config.DB.Model(&models.User{}).Where("username = ?", username).Count(&count).Error; err != nil {
+			log.Printf("GitHub OAuth: Error checking username uniqueness: %v", err)
+			return nil, err
+		}
+		if count == 0 {
+			break
+		}
+		username = fmt.Sprintf("%s%d", baseUsername, i+1)
+	}
 
     // Set a random hashed password to satisfy NOT NULL constraint
     rnd := make([]byte, 24)
@@ -239,19 +251,22 @@ func linkOrCreateUserFromGitHub(ghUser map[string]any, email string) (*models.Us
         return nil, err
     }
 
-    newUser := models.User{
-        Username:  username,
-        Email:     email,
-        Password:  string(hashed),
-        Role:      "user",
-        Provider:  "github",
-        GitHubID:  ghID,
-        AvatarURL: avatar,
-    }
-    if err := config.DB.Create(&newUser).Error; err != nil {
-        return nil, err
-    }
-    return &newUser, nil
+	newUser := models.User{
+		Username:  username,
+		Email:     email,
+		Password:  string(hashed),
+		Role:      "user",
+		Provider:  "github",
+		GitHubID:  ghID,
+		AvatarURL: avatar,
+	}
+	log.Printf("GitHub OAuth: Creating user with username: %s, email: %s, ghID: %s", username, email, ghID)
+	if err := config.DB.Create(&newUser).Error; err != nil {
+		log.Printf("GitHub OAuth: Error creating new user: %v", err)
+		return nil, err
+	}
+	log.Printf("GitHub OAuth: Successfully created new user with ID: %d", newUser.ID)
+	return &newUser, nil
 }
 
 // Optional: debug endpoint to verify GitHub env
