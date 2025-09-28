@@ -1,0 +1,21 @@
+name: Discord Commit Notifications
+on:
+  push:
+    branches: [ main, master, develop ]
+    # Ignore changes to docs and configs
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # Skip for bot commits
+    if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
+    steps:
+      - name: Send Discord Notification
+        uses: wilfierd/gh-noftify@v1
+        with:
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
