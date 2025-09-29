@@ -51,6 +51,14 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Room represents a chat room from the API.
+type Room struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // DeviceStartResponse is returned when initiating a GitHub device flow.
 type DeviceStartResponse struct {
 	DeviceCode              string `json:"device_code"`
@@ -165,4 +173,35 @@ func (c *Client) Profile(token string) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+// GetRooms fetches the list of available chat rooms using a bearer token.
+func (c *Client) GetRooms(token string) ([]Room, error) {
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/api/v1/rooms", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Rooms []Room `json:"rooms"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response.Rooms, nil
 }

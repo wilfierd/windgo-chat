@@ -25,6 +25,7 @@ const (
 	stateDeviceSetup
 	stateDeviceWaiting
 	stateLoggedIn
+	stateChatLobby
 )
 
 var (
@@ -58,6 +59,10 @@ type Model struct {
 	passwordInput textinput.Model
 
 	deviceInfo *api.DeviceStartResponse
+
+	// Chat lobby data
+	rooms     []api.Room
+	roomIndex int
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -129,6 +134,11 @@ type deviceStartMsg struct {
 	resp *api.DeviceStartResponse
 }
 
+type roomsLoadedMsg struct {
+	rooms []api.Room
+	err   error
+}
+
 func (m Model) Init() tea.Cmd {
 	return loadStoredCredentials()
 }
@@ -198,6 +208,16 @@ func saveCredentialsCmd(resp *api.AuthResponse) tea.Cmd {
 	}
 }
 
+func loadRoomsCmd(client *api.Client, token string) tea.Cmd {
+	return func() tea.Msg {
+		rooms, err := client.GetRooms(token)
+		if err != nil {
+			return roomsLoadedMsg{err: err}
+		}
+		return roomsLoadedMsg{rooms: rooms}
+	}
+}
+
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		keyMsg tea.KeyMsg
@@ -233,9 +253,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.user = msg.user
-		m.state = stateLoggedIn
-		m.status = fmt.Sprintf("Welcome back, %s!", m.user.Username)
-		return m, nil
+		m.status = "Loading chat rooms..."
+		return m, loadRoomsCmd(m.client, m.token)
 
 	case deviceStartMsg:
 		m.submitting = false
@@ -263,9 +282,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.token = msg.resp.Token
 		m.user = &msg.resp.User
-		m.state = stateLoggedIn
-		m.status = fmt.Sprintf("Welcome, %s!", m.user.Username)
-		return m, saveCredentialsCmd(msg.resp)
+		m.status = "Loading chat rooms..."
+		return m, tea.Batch(
+			saveCredentialsCmd(msg.resp),
+			loadRoomsCmd(m.client, m.token),
+		)
 
 	case credsSavedMsg:
 		if msg.err != nil {
@@ -284,6 +305,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.err != nil {
 			m.status = ""
 		}
+		return m, nil
+
+	case roomsLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Failed to load chat rooms"
+			m.state = stateLoggedIn
+			return m, nil
+		}
+		m.rooms = msg.rooms
+		m.roomIndex = 0
+		m.state = stateChatLobby
+		m.status = fmt.Sprintf("Found %d chat rooms. Use arrows to navigate.", len(m.rooms))
 		return m, nil
 
 	}
@@ -442,6 +476,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
+
+	case stateChatLobby:
+		switch msg.String() {
+		case "up", "k":
+			if m.roomIndex > 0 {
+				m.roomIndex--
+			}
+		case "down", "j":
+			if m.roomIndex < len(m.rooms)-1 {
+				m.roomIndex++
+			}
+		case "enter":
+			if len(m.rooms) > 0 {
+				selectedRoom := m.rooms[m.roomIndex]
+				m.status = fmt.Sprintf("Joining room: %s", selectedRoom.Name)
+				// TODO: Transition to chat room view (future implementation)
+			}
+		case "q":
+			return m, tea.Quit
+		case "esc":
+			m.state = stateLoggedIn
+			m.status = fmt.Sprintf("Welcome back, %s!", m.user.Username)
+		}
 	}
 
 	return m, nil
@@ -507,6 +564,25 @@ func (m Model) View() string {
 	case stateLoggedIn:
 		b.WriteString(fmt.Sprintf("Logged in as %s (%s).\n", m.user.Username, m.user.Email))
 		b.WriteString("Press q to quit. The chat lobby will be available in the next milestone.")
+
+	case stateChatLobby:
+		b.WriteString(fmt.Sprintf("Chat Lobby - Logged in as %s\n\n", m.user.Username))
+		
+		if len(m.rooms) == 0 {
+			b.WriteString("No chat rooms available.")
+		} else {
+			b.WriteString("Available chat rooms:\n\n")
+			for i, room := range m.rooms {
+				if i == m.roomIndex {
+					b.WriteString(selectedItem.Render(fmt.Sprintf("> %s", room.Name)))
+				} else {
+					b.WriteString(fmt.Sprintf("  %s", room.Name))
+				}
+				b.WriteString("\n")
+			}
+		}
+		
+		b.WriteString("\nUse ↑/↓ to navigate, Enter to join room, q to logout.")
 	}
 
 	return menuStyle.Render(b.String())
