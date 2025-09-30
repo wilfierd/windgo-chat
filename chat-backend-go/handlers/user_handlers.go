@@ -4,6 +4,7 @@ import (
 	"chat-backend-go/config"
 	"chat-backend-go/models"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -25,6 +26,23 @@ func ListUsers(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to fetch users",
 		})
+	}
+
+	// Calculate online status based on last_active_at
+	// User is online if active within last 5 minutes
+	for i := range users {
+		if users[i].LastActiveAt != nil {
+			timeSince := time.Since(*users[i].LastActiveAt)
+			users[i].IsOnline = timeSince < 5*time.Minute
+			if users[i].IsOnline {
+				users[i].Status = "online"
+			} else {
+				users[i].Status = "offline"
+			}
+		} else {
+			users[i].IsOnline = false
+			users[i].Status = "offline"
+		}
 	}
 
 	return c.JSON(fiber.Map{

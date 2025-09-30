@@ -40,15 +40,18 @@ type AuthResponse struct {
 
 // User is a trimmed down view for the CLI.
 type User struct {
-	ID        uint      `json:"id"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	Provider  string    `json:"provider"`
-	GitHubID  string    `json:"github_id"`
-	AvatarURL string    `json:"avatar_url"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           uint       `json:"id"`
+	Username     string     `json:"username"`
+	Email        string     `json:"email"`
+	Role         string     `json:"role"`
+	Provider     string     `json:"provider"`
+	GitHubID     string     `json:"github_id"`
+	AvatarURL    string     `json:"avatar_url"`
+	LastActiveAt *time.Time `json:"last_active_at"` // NEW: Track user activity
+	IsOnline     bool       `json:"is_online"`      // NEW: Online status
+	Status       string     `json:"status"`         // NEW: User status (online/away/busy/offline)
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // Room represents a chat room from the API.

@@ -10,6 +10,7 @@ import (
 // UserRoutes exposes user directory endpoints required by the CLI
 func UserRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
-	users := api.Group("/users", middleware.AuthRequired())
+	// Apply activity tracking to all authenticated routes
+	users := api.Group("/users", middleware.AuthRequired(), middleware.TrackActivity())
 	users.Get("/", handlers.ListUsers)
 }

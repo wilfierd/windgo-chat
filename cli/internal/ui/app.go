@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -25,7 +26,7 @@ const (
 	stateEmailLogin
 	stateDeviceSetup
 	stateDeviceWaiting
-	stateLoggedIn
+	stateMainMenu
 	stateChatLobby
 )
 
@@ -37,16 +38,60 @@ const (
 )
 
 var (
-	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	menuStyle    = lipgloss.NewStyle().Padding(1, 0)
-	selectedItem = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	statusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	// Clean, minimalist color scheme - like Claude's interface
+	// No backgrounds, just simple foreground colors
+	
+	titleStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("39")) // Bright cyan for headers
+
+	menuStyle = lipgloss.NewStyle().Padding(1, 0)
+
+	// Selected items - just bold and colored, no background
+	selectedItem = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("86")). // Bright cyan/blue
+		Bold(true)
+
+	// Normal items - default terminal color
+	normalItem = lipgloss.NewStyle().Foreground(lipgloss.Color("7")) // Default white/gray
+
+	// Dimmed text for secondary info
+	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Dim gray
+
+	// Errors - just red, no bold
+	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")) // Bright red
+
+	// Success messages
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Bright green
+
+	// Online status - green dot
+	onlineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
+
+	// Offline status - dim
+	offlineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Dim gray
+
+	// Help text - dimmed
+	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Dim gray
+
+	// Borders - simple, no fancy styles
+	borderStyle = lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("8"))
+
+	// Separators
+	separatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
 var loginOptions = []string{
 	"Login with email/password",
 	"Login with GitHub device flow",
+}
+
+var mainMenuOptions = []string{
+	"Chat Lobby",
+	"My Profile",
+	"Settings",
+	"Logout",
 }
 
 // Model holds application state for the login experience.
@@ -335,8 +380,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.user = msg.user
-		m.status = "Loading chat rooms..."
-		return m, loadRoomsCmd(m.client, m.token)
+		m.state = stateMainMenu
+		m.menuIndex = 0
+		m.status = "" // Clear status, the menu shows who's logged in
+		return m, nil
 
 	case deviceStartMsg:
 		m.submitting = false
@@ -364,11 +411,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.token = msg.resp.Token
 		m.user = &msg.resp.User
-		m.status = "Loading chat rooms..."
-		return m, tea.Batch(
-			saveCredentialsCmd(msg.resp),
-			loadRoomsCmd(m.client, m.token),
-		)
+		m.state = stateMainMenu
+		m.menuIndex = 0
+		m.status = "" // Clear status, the menu shows who's logged in
+		return m, saveCredentialsCmd(msg.resp)
 
 	case credsSavedMsg:
 		if msg.err != nil {
@@ -393,7 +439,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = "Failed to load chat rooms"
-			m.state = stateLoggedIn
+			m.state = stateMainMenu
 			return m, nil
 		}
 		m.rooms = msg.rooms
@@ -582,8 +628,40 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.err = nil
 		}
 
-	case stateLoggedIn:
+	case stateMainMenu:
 		switch msg.String() {
+		case "up", "k":
+			if m.menuIndex > 0 {
+				m.menuIndex--
+			}
+		case "down", "j":
+			if m.menuIndex < len(mainMenuOptions)-1 {
+				m.menuIndex++
+			}
+		case "enter":
+			switch m.menuIndex {
+			case 0: // Chat Lobby
+				m.status = "Loading chat rooms..."
+				m.state = stateChatLobby
+				return m, tea.Batch(
+					loadRoomsCmd(m.client, m.token),
+					loadUsersCmd(m.client, m.token),
+				)
+			case 1: // My Profile
+				m.status = "Profile view coming soon..."
+			case 2: // Settings
+				m.status = "Settings coming soon..."
+			case 3: // Logout
+				m.token = ""
+				m.user = nil
+				m.rooms = nil
+				m.users = nil
+				m.state = stateLoginMenu
+				m.menuIndex = 0
+				m.status = "Logged out successfully. Choose how you want to sign in."
+				// Clear stored credentials
+				_ = storage.Save(storage.Credentials{})
+			}
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
@@ -643,9 +721,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 			case "q":
 				return m, tea.Quit
-			case "esc":
-				m.state = stateLoggedIn
-				m.status = fmt.Sprintf("Welcome back, %s!", m.user.Username)
+			case "m", "esc":
+				m.state = stateMainMenu
+				m.menuIndex = 0
+				m.status = ""
+				// Clear search when leaving lobby
+				m.searchActive = false
+				m.searchInput.SetValue("")
+				m.searchInput.Blur()
 			}
 		}
 	}
@@ -710,20 +793,39 @@ func (m Model) View() string {
 	case stateDeviceWaiting:
 		b.WriteString("Waiting for GitHub authorization...\nPress Esc to cancel.")
 
-	case stateLoggedIn:
-		b.WriteString(fmt.Sprintf("Logged in as %s (%s).\n", m.user.Username, m.user.Email))
-		b.WriteString("Press q to quit. The chat lobby will be available in the next milestone.")
+	case stateMainMenu:
+		b.WriteString(titleStyle.Render("WindGo Chat"))
+		b.WriteString("\n\n")
+		b.WriteString(statusStyle.Render(fmt.Sprintf("Logged in as %s\n", m.user.Username)))
+		b.WriteString("\n")
+
+		for i, opt := range mainMenuOptions {
+			if i == m.menuIndex {
+				b.WriteString(selectedItem.Render("> " + opt))
+			} else {
+				b.WriteString(normalItem.Render("  " + opt))
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("↑/↓: navigate | Enter: select | q: quit"))
 
 	case stateChatLobby:
-		b.WriteString(fmt.Sprintf("Chat Lobby - Logged in as %s\n\n", m.user.Username))
+		b.WriteString(titleStyle.Render("Chat Lobby"))
+		b.WriteString(" ")
+		b.WriteString(statusStyle.Render("- " + m.user.Username))
+		b.WriteString("\n\n")
 
-		// Tab selector
+		// Tab selector - clean style
 		if m.currentView == lobbyViewRooms {
-			b.WriteString(selectedItem.Render("[Rooms]"))
-			b.WriteString("  People\n\n")
+			b.WriteString(selectedItem.Render("Rooms"))
+			b.WriteString("  ")
+			b.WriteString(statusStyle.Render("People"))
+			b.WriteString("\n\n")
 		} else {
-			b.WriteString("Rooms  ")
-			b.WriteString(selectedItem.Render("[People]"))
+			b.WriteString(statusStyle.Render("Rooms"))
+			b.WriteString("  ")
+			b.WriteString(selectedItem.Render("People"))
 			b.WriteString("\n\n")
 		}
 
@@ -786,7 +888,17 @@ func (m Model) View() string {
 					b.WriteString("No users available.")
 				}
 			} else {
-				b.WriteString(fmt.Sprintf("Available users (%d):\n\n", len(m.filteredUsers)))
+				// Count online users
+				onlineCount := 0
+				for _, user := range m.filteredUsers {
+					if user.IsOnline {
+						onlineCount++
+					}
+				}
+				b.WriteString(fmt.Sprintf("Available users (%d, %s online):\n\n", 
+					len(m.filteredUsers),
+					onlineStyle.Render(fmt.Sprintf("%d", onlineCount))))
+				
 				// Show max 15 items for scrolling simulation
 				startIdx := 0
 				endIdx := len(m.filteredUsers)
@@ -809,10 +921,41 @@ func (m Model) View() string {
 				}
 				for i := startIdx; i < endIdx; i++ {
 					user := m.filteredUsers[i]
-					if i == m.userIndex {
-						b.WriteString(selectedItem.Render(fmt.Sprintf("> %s (%s)", user.Username, user.Email)))
+					
+					// Status indicator
+					var statusIcon string
+					if user.IsOnline {
+						statusIcon = onlineStyle.Render("●") // Filled dot
 					} else {
-						b.WriteString(fmt.Sprintf("  %s (%s)", user.Username, user.Email))
+						statusIcon = offlineStyle.Render("○") // Empty circle
+					}
+					
+					// Last seen time
+					var lastSeen string
+					if user.LastActiveAt != nil {
+						duration := time.Since(*user.LastActiveAt)
+						if duration < time.Minute {
+							lastSeen = "just now"
+						} else if duration < time.Hour {
+							lastSeen = fmt.Sprintf("%dm ago", int(duration.Minutes()))
+						} else if duration < 24*time.Hour {
+							lastSeen = fmt.Sprintf("%dh ago", int(duration.Hours()))
+						} else {
+							lastSeen = fmt.Sprintf("%dd ago", int(duration.Hours()/24))
+						}
+					}
+					
+					userLine := fmt.Sprintf("%s %s", statusIcon, user.Username)
+					if lastSeen != "" && !user.IsOnline {
+						userLine += " " + helpStyle.Render("("+lastSeen+")")
+					} else if user.IsOnline {
+						userLine += " " + onlineStyle.Render("(online)")
+					}
+					
+					if i == m.userIndex {
+						b.WriteString(selectedItem.Render("> " + userLine))
+					} else {
+						b.WriteString("  " + userLine)
 					}
 					b.WriteString("\n")
 				}
@@ -822,7 +965,8 @@ func (m Model) View() string {
 			}
 		}
 
-		b.WriteString("\nTab: switch view | ↑/↓: navigate | Enter: select | /: search | Esc: back | q: quit")
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("Tab: switch view | ↑/↓: navigate | Enter: select | /: search | m/Esc: menu | q: quit"))
 	}
 
 	return menuStyle.Render(b.String())

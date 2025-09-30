@@ -27,9 +27,9 @@ func SetupAuthRoutes(app *fiber.App) {
     auth.Post("/github/device/start", handlers.GitHubDeviceStart)
     auth.Post("/github/device/poll", handlers.GitHubDevicePoll)
 
-    // Protected routes (authentication required)
-    auth.Get("/profile", middleware.AuthRequired(), handlers.GetProfile)
-	auth.Post("/refresh", middleware.AuthRequired(), func(c *fiber.Ctx) error {
+    // Protected routes (authentication required with activity tracking)
+    auth.Get("/profile", middleware.AuthRequired(), middleware.TrackActivity(), handlers.GetProfile)
+	auth.Post("/refresh", middleware.AuthRequired(), middleware.TrackActivity(), func(c *fiber.Ctx) error {
 		// Get user ID from middleware
 		userID := c.Locals("userID").(uint)
 
