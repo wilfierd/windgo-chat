@@ -205,3 +205,40 @@ func (c *Client) GetRooms(token string) ([]Room, error) {
 	}
 	return response.Rooms, nil
 }
+
+// GetUsers fetches the list of available users using a bearer token.
+// Optionally filters by search query.
+func (c *Client) GetUsers(token, search string) ([]User, error) {
+	url := c.BaseURL + "/api/v1/users"
+	if search != "" {
+		url += "?search=" + search
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Users []User `json:"users"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response.Users, nil
+}

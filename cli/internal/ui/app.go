@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -26,6 +27,13 @@ const (
 	stateDeviceWaiting
 	stateLoggedIn
 	stateChatLobby
+)
+
+type lobbyView int
+
+const (
+	lobbyViewRooms lobbyView = iota
+	lobbyViewPeople
 )
 
 var (
@@ -61,8 +69,20 @@ type Model struct {
 	deviceInfo *api.DeviceStartResponse
 
 	// Chat lobby data
-	rooms     []api.Room
-	roomIndex int
+	rooms         []api.Room
+	filteredRooms []api.Room
+	roomIndex     int
+
+	users         []api.User
+	filteredUsers []api.User
+	userIndex     int
+
+	currentView  lobbyView
+	searchInput  textinput.Model
+	searchActive bool
+
+	viewport      viewport.Model
+	viewportReady bool
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -98,11 +118,18 @@ func NewModel(client *api.Client) Model {
 	password.EchoCharacter = '•'
 	password.CharLimit = 256
 
+	search := textinput.New()
+	search.Placeholder = "Search..."
+	search.CharLimit = 50
+	search.Width = 30
+
 	return Model{
 		client:        client,
 		state:         stateLoading,
 		emailInput:    email,
 		passwordInput: password,
+		searchInput:   search,
+		currentView:   lobbyViewRooms,
 	}
 }
 
@@ -136,6 +163,11 @@ type deviceStartMsg struct {
 
 type roomsLoadedMsg struct {
 	rooms []api.Room
+	err   error
+}
+
+type usersLoadedMsg struct {
+	users []api.User
 	err   error
 }
 
@@ -215,6 +247,56 @@ func loadRoomsCmd(client *api.Client, token string) tea.Cmd {
 			return roomsLoadedMsg{err: err}
 		}
 		return roomsLoadedMsg{rooms: rooms}
+	}
+}
+
+func loadUsersCmd(client *api.Client, token string) tea.Cmd {
+	return func() tea.Msg {
+		users, err := client.GetUsers(token, "")
+		if err != nil {
+			return usersLoadedMsg{err: err}
+		}
+		return usersLoadedMsg{users: users}
+	}
+}
+
+// applyFilters filters rooms and users based on search input
+func (m *Model) applyFilters() {
+	query := strings.ToLower(m.searchInput.Value())
+
+	// Filter rooms
+	if query == "" {
+		m.filteredRooms = m.rooms
+	} else {
+		filtered := []api.Room{}
+		for _, room := range m.rooms {
+			if strings.Contains(strings.ToLower(room.Name), query) {
+				filtered = append(filtered, room)
+			}
+		}
+		m.filteredRooms = filtered
+	}
+
+	// Filter users
+	if query == "" {
+		m.filteredUsers = m.users
+	} else {
+		filtered := []api.User{}
+		for _, user := range m.users {
+			if strings.Contains(strings.ToLower(user.Username), query) ||
+				strings.Contains(strings.ToLower(user.Email), query) {
+				filtered = append(filtered, user)
+			}
+		}
+		m.filteredUsers = filtered
+	}
+
+	// Reset indices if out of bounds
+	if m.roomIndex >= len(m.filteredRooms) {
+		m.roomIndex = 0
+	}
+	if m.userIndex >= len(m.filteredUsers) {
+		m.userIndex = 0
 	}
 }
 
@@ -315,9 +397,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.rooms = msg.rooms
+		m.filteredRooms = msg.rooms
 		m.roomIndex = 0
 		m.state = stateChatLobby
-		m.status = fmt.Sprintf("Found %d chat rooms. Use arrows to navigate.", len(m.rooms))
+		m.status = "Loading users..."
+		return m, loadUsersCmd(m.client, m.token)
+
+	case usersLoadedMsg:
+		if msg.err != nil {
+			// Non-critical error, users list is optional
+			m.status = fmt.Sprintf("Found %d rooms. Press / to search, Tab to switch views.", len(m.rooms))
+			return m, nil
+		}
+		m.users = msg.users
+		m.filteredUsers = msg.users
+		m.userIndex = 0
+		m.status = fmt.Sprintf("Found %d rooms, %d users. Press / to search, Tab to switch views.", len(m.rooms), len(m.users))
 		return m, nil
 
 	}
@@ -340,6 +435,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			}
+		}
+		// Handle search input in chat lobby
+		if m.state == stateChatLobby && m.searchActive {
+			skipSearch := false
+			switch keyMsg.String() {
+			case "esc", "enter":
+				skipSearch = true
+			}
+			if !skipSearch {
+				var cmd tea.Cmd
+				m.searchInput, cmd = m.searchInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.applyFilters()
 			}
 		}
 		var keyCmd tea.Cmd
@@ -478,26 +589,64 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case stateChatLobby:
-		switch msg.String() {
-		case "up", "k":
-			if m.roomIndex > 0 {
-				m.roomIndex--
+		if m.searchActive {
+			switch msg.String() {
+			case "esc":
+				m.searchActive = false
+				m.searchInput.Blur()
+				m.searchInput.SetValue("")
+				m.applyFilters()
+			case "enter":
+				m.searchActive = false
+				m.searchInput.Blur()
 			}
-		case "down", "j":
-			if m.roomIndex < len(m.rooms)-1 {
-				m.roomIndex++
+		} else {
+			switch msg.String() {
+			case "/":
+				m.searchActive = true
+				m.searchInput.Focus()
+			case "tab":
+				if m.currentView == lobbyViewRooms {
+					m.currentView = lobbyViewPeople
+				} else {
+					m.currentView = lobbyViewRooms
+				}
+			case "up", "k":
+				if m.currentView == lobbyViewRooms {
+					if m.roomIndex > 0 {
+						m.roomIndex--
+					}
+				} else {
+					if m.userIndex > 0 {
+						m.userIndex--
+					}
+				}
+			case "down", "j":
+				if m.currentView == lobbyViewRooms {
+					if m.roomIndex < len(m.filteredRooms)-1 {
+						m.roomIndex++
+					}
+				} else {
+					if m.userIndex < len(m.filteredUsers)-1 {
+						m.userIndex++
+					}
+				}
+			case "enter":
+				if m.currentView == lobbyViewRooms && len(m.filteredRooms) > 0 {
+					selectedRoom := m.filteredRooms[m.roomIndex]
+					m.status = fmt.Sprintf("Joining room: %s", selectedRoom.Name)
+					// TODO: Transition to chat room view (future implementation)
+				} else if m.currentView == lobbyViewPeople && len(m.filteredUsers) > 0 {
+					selectedUser := m.filteredUsers[m.userIndex]
+					m.status = fmt.Sprintf("Starting DM with: %s", selectedUser.Username)
+					// TODO: Implement DM functionality
+				}
+			case "q":
+				return m, tea.Quit
+			case "esc":
+				m.state = stateLoggedIn
+				m.status = fmt.Sprintf("Welcome back, %s!", m.user.Username)
 			}
-		case "enter":
-			if len(m.rooms) > 0 {
-				selectedRoom := m.rooms[m.roomIndex]
-				m.status = fmt.Sprintf("Joining room: %s", selectedRoom.Name)
-				// TODO: Transition to chat room view (future implementation)
-			}
-		case "q":
-			return m, tea.Quit
-		case "esc":
-			m.state = stateLoggedIn
-			m.status = fmt.Sprintf("Welcome back, %s!", m.user.Username)
 		}
 	}
 
@@ -567,22 +716,113 @@ func (m Model) View() string {
 
 	case stateChatLobby:
 		b.WriteString(fmt.Sprintf("Chat Lobby - Logged in as %s\n\n", m.user.Username))
-		
-		if len(m.rooms) == 0 {
-			b.WriteString("No chat rooms available.")
+
+		// Tab selector
+		if m.currentView == lobbyViewRooms {
+			b.WriteString(selectedItem.Render("[Rooms]"))
+			b.WriteString("  People\n\n")
 		} else {
-			b.WriteString("Available chat rooms:\n\n")
-			for i, room := range m.rooms {
-				if i == m.roomIndex {
-					b.WriteString(selectedItem.Render(fmt.Sprintf("> %s", room.Name)))
+			b.WriteString("Rooms  ")
+			b.WriteString(selectedItem.Render("[People]"))
+			b.WriteString("\n\n")
+		}
+
+		// Search bar
+		if m.searchActive {
+			b.WriteString("Search: " + m.searchInput.View() + "\n\n")
+		} else {
+			b.WriteString("Press / to search\n\n")
+		}
+
+		// Display current view
+		if m.currentView == lobbyViewRooms {
+			if len(m.filteredRooms) == 0 {
+				if m.searchInput.Value() != "" {
+					b.WriteString("No rooms match your search.")
 				} else {
-					b.WriteString(fmt.Sprintf("  %s", room.Name))
+					b.WriteString("No chat rooms available.")
 				}
-				b.WriteString("\n")
+			} else {
+				b.WriteString(fmt.Sprintf("Available rooms (%d):\n\n", len(m.filteredRooms)))
+				// Show max 15 items for scrolling simulation
+				startIdx := 0
+				endIdx := len(m.filteredRooms)
+				if endIdx > 15 {
+					// Simple viewport: show items around selection
+					if m.roomIndex > 7 {
+						startIdx = m.roomIndex - 7
+					}
+					endIdx = startIdx + 15
+					if endIdx > len(m.filteredRooms) {
+						endIdx = len(m.filteredRooms)
+						startIdx = endIdx - 15
+						if startIdx < 0 {
+							startIdx = 0
+						}
+					}
+				}
+				if startIdx > 0 {
+					b.WriteString("  ↑ More items above\n")
+				}
+				for i := startIdx; i < endIdx; i++ {
+					room := m.filteredRooms[i]
+					if i == m.roomIndex {
+						b.WriteString(selectedItem.Render(fmt.Sprintf("> %s", room.Name)))
+					} else {
+						b.WriteString(fmt.Sprintf("  %s", room.Name))
+					}
+					b.WriteString("\n")
+				}
+				if endIdx < len(m.filteredRooms) {
+					b.WriteString("  ↓ More items below\n")
+				}
+			}
+		} else {
+			// People view
+			if len(m.filteredUsers) == 0 {
+				if m.searchInput.Value() != "" {
+					b.WriteString("No users match your search.")
+				} else {
+					b.WriteString("No users available.")
+				}
+			} else {
+				b.WriteString(fmt.Sprintf("Available users (%d):\n\n", len(m.filteredUsers)))
+				// Show max 15 items for scrolling simulation
+				startIdx := 0
+				endIdx := len(m.filteredUsers)
+				if endIdx > 15 {
+					// Simple viewport: show items around selection
+					if m.userIndex > 7 {
+						startIdx = m.userIndex - 7
+					}
+					endIdx = startIdx + 15
+					if endIdx > len(m.filteredUsers) {
+						endIdx = len(m.filteredUsers)
+						startIdx = endIdx - 15
+						if startIdx < 0 {
+							startIdx = 0
+						}
+					}
+				}
+				if startIdx > 0 {
+					b.WriteString("  ↑ More items above\n")
+				}
+				for i := startIdx; i < endIdx; i++ {
+					user := m.filteredUsers[i]
+					if i == m.userIndex {
+						b.WriteString(selectedItem.Render(fmt.Sprintf("> %s (%s)", user.Username, user.Email)))
+					} else {
+						b.WriteString(fmt.Sprintf("  %s (%s)", user.Username, user.Email))
+					}
+					b.WriteString("\n")
+				}
+				if endIdx < len(m.filteredUsers) {
+					b.WriteString("  ↓ More items below\n")
+				}
 			}
 		}
-		
-		b.WriteString("\nUse ↑/↓ to navigate, Enter to join room, q to logout.")
+
+		b.WriteString("\nTab: switch view | ↑/↓: navigate | Enter: select | /: search | Esc: back | q: quit")
 	}
 
 	return menuStyle.Render(b.String())

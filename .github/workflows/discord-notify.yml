@@ -15,7 +15,7 @@ jobs:
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
     steps:
       - name: Send Discord Notification
-        uses: wilfierd/gh-noftify@v0.1.1
+        uses: wilfierd/gh-noftify@v0.1.2
         with:
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
