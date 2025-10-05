@@ -112,7 +112,3 @@ curl -sS http://localhost:8080/api/auth/profile \
   -H 'Authorization: Bearer TOKEN'
 ```
 
-
-## License
-
-MIT
