@@ -62,6 +62,31 @@ type Room struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Message represents a chat message from the API.
+type Message struct {
+	ID        uint      `json:"id"`
+	Content   string    `json:"content"`
+	UserID    uint      `json:"user_id"`
+	RoomID    uint      `json:"room_id"`
+	User      User      `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Pagination holds the pagination data from the API.
+type Pagination struct {
+	Page       int   `json:"page"`
+	Limit      int   `json:"limit"`
+	Total      int64 `json:"total"`
+	TotalPages int64 `json:"totalPages"`
+}
+
+// MessagesResponse is the expected response for getting messages.
+type MessagesResponse struct {
+	Messages   []Message  `json:"messages"`
+	Pagination Pagination `json:"pagination"`
+}
+
 // DeviceStartResponse is returned when initiating a GitHub device flow.
 type DeviceStartResponse struct {
 	DeviceCode              string `json:"device_code"`
@@ -77,7 +102,7 @@ type APIError struct {
 	Error string `json:"error"`
 }
 
-func (c *Client) postJSON(path string, reqBody any, v any) error {
+func (c *Client) postJSON(path string, reqBody any, v any, token ...string) error {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return err
@@ -88,6 +113,9 @@ func (c *Client) postJSON(path string, reqBody any, v any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if len(token) > 0 {
+		req.Header.Set("Authorization", "Bearer "+token[0])
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -149,30 +177,38 @@ func (c *Client) PollDevice(deviceCode string, timeoutSeconds int) (*AuthRespons
 	return &resp, nil
 }
 
-// Profile fetches the authenticated user using a bearer token.
-func (c *Client) Profile(token string) (*User, error) {
-	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/api/auth/profile", nil)
+func (c *Client) getJSON(path, token string, v any) error {
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		var apiErr APIError
 		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
+			return fmt.Errorf("api error: %s", resp.Status)
 		}
-		return nil, errors.New(apiErr.Error)
+		return errors.New(apiErr.Error)
 	}
 
+	if v != nil {
+		return json.NewDecoder(resp.Body).Decode(v)
+	}
+	return nil
+}
+
+// Profile fetches the authenticated user using a bearer token.
+func (c *Client) Profile(token string) (*User, error) {
 	var user User
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+	err := c.getJSON("/api/auth/profile", token, &user)
+	if err != nil {
 		return nil, err
 	}
 	return &user, nil
@@ -180,30 +216,11 @@ func (c *Client) Profile(token string) (*User, error) {
 
 // GetRooms fetches the list of available chat rooms using a bearer token.
 func (c *Client) GetRooms(token string) ([]Room, error) {
-	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/api/v1/rooms", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
-	}
-
 	var response struct {
 		Rooms []Room `json:"rooms"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	err := c.getJSON("/api/v1/rooms", token, &response)
+	if err != nil {
 		return nil, err
 	}
 	return response.Rooms, nil
@@ -212,36 +229,42 @@ func (c *Client) GetRooms(token string) ([]Room, error) {
 // GetUsers fetches the list of available users using a bearer token.
 // Optionally filters by search query.
 func (c *Client) GetUsers(token, search string) ([]User, error) {
-	url := c.BaseURL + "/api/v1/users"
+	url := "/api/v1/users"
 	if search != "" {
 		url += "?search=" + search
 	}
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
-	}
-
 	var response struct {
 		Users []User `json:"users"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	err := c.getJSON(url, token, &response)
+	if err != nil {
 		return nil, err
 	}
 	return response.Users, nil
+}
+
+// GetMessages fetches messages for a room with an auth token.
+func (c *Client) GetMessages(token string, roomID uint, page, limit int) (*MessagesResponse, error) {
+	path := fmt.Sprintf("/api/v1/rooms/%d/messages?page=%d&limit=%d", roomID, page, limit)
+	var resp MessagesResponse
+	err := c.getJSON(path, token, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SendMessage posts a new message to a room.
+func (c *Client) SendMessage(token string, roomID uint, content string) (*Message, error) {
+	var resp struct {
+		Data Message `json:"data"`
+	}
+	err := c.postJSON("/api/v1/messages", map[string]any{
+		"room_id": roomID,
+		"content": content,
+	}, &resp, token)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Data, nil
 }

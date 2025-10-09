@@ -28,6 +28,7 @@ const (
 	stateDeviceWaiting
 	stateMainMenu
 	stateChatLobby
+	stateChatRoom
 )
 
 type lobbyView int
@@ -126,8 +127,10 @@ type Model struct {
 	searchInput  textinput.Model
 	searchActive bool
 
-	viewport      viewport.Model
-	viewportReady bool
+	// Chat room view
+	chatModel chatModel
+
+	width, height int
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -347,13 +350,32 @@ func (m *Model) applyFilters() {
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var (
-		keyMsg tea.KeyMsg
-		isKey  bool
+		cmd  tea.Cmd
+		cmds []tea.Cmd
 	)
-	if km, ok := message.(tea.KeyMsg); ok {
-		keyMsg = km
-		isKey = true
+
+	switch msg := message.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		// Propagate to sub-models
+		m.chatModel.SetSize(msg.Width, msg.Height)
+		return m, nil
+	case backToLobbyMsg:
+		m.state = stateChatLobby
+		m.status = fmt.Sprintf("Found %d rooms, %d users. Press / to search, Tab to switch views.", len(m.rooms), len(m.users))
+		m.err = nil
+		return m, nil
+	// Delegate messages to the chat model when it's active
+	case messagesLoadedMsg, messageSentMsg:
+		if m.state == stateChatRoom {
+			newChatModel, chatCmd := m.chatModel.Update(msg)
+			m.chatModel = newChatModel
+			return m, chatCmd
+		}
 	}
+
+	// Handle all other messages for the main model
 	switch msg := message.(type) {
 	case storedCredsMsg:
 		if msg.err != nil {
@@ -463,62 +485,38 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	}
 
-	if isKey {
-		var cmds []tea.Cmd
-		if m.state == stateEmailLogin {
-			skipInputs := false
-			switch keyMsg.String() {
-			case "enter", "tab", "shift+tab", "esc":
-				skipInputs = true
-			}
-			if !skipInputs {
-				var cmd tea.Cmd
-				m.emailInput, cmd = m.emailInput.Update(message)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				m.passwordInput, cmd = m.passwordInput.Update(message)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
+	// Process inputs and other messages for the current state
+	switch m.state {
+	case stateChatRoom:
+		var chatCmd tea.Cmd
+		m.chatModel, chatCmd = m.chatModel.Update(message)
+		cmds = append(cmds, chatCmd)
+
+	case stateEmailLogin:
+		var emailCmd, passCmd tea.Cmd
+		m.emailInput, emailCmd = m.emailInput.Update(message)
+		m.passwordInput, passCmd = m.passwordInput.Update(message)
+		cmds = append(cmds, emailCmd, passCmd)
+
+	case stateChatLobby:
+		if m.searchActive {
+			var searchCmd tea.Cmd
+			m.searchInput, searchCmd = m.searchInput.Update(message)
+			m.applyFilters()
+			cmds = append(cmds, searchCmd)
 		}
-		// Handle search input in chat lobby
-		if m.state == stateChatLobby && m.searchActive {
-			skipSearch := false
-			switch keyMsg.String() {
-			case "esc", "enter":
-				skipSearch = true
-			}
-			if !skipSearch {
-				var cmd tea.Cmd
-				m.searchInput, cmd = m.searchInput.Update(message)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				m.applyFilters()
-			}
-		}
+	}
+
+	// Key handling is separate from other message processing
+	if keyMsg, ok := message.(tea.KeyMsg); ok {
 		var keyCmd tea.Cmd
 		m, keyCmd = m.handleKey(keyMsg)
 		if keyCmd != nil {
 			cmds = append(cmds, keyCmd)
 		}
-		return m, tea.Batch(cmds...)
 	}
 
-	switch m.state {
-	case stateEmailLogin:
-		var cmds []tea.Cmd
-		var cmd tea.Cmd
-		m.emailInput, cmd = m.emailInput.Update(message)
-		cmds = append(cmds, cmd)
-		m.passwordInput, cmd = m.passwordInput.Update(message)
-		cmds = append(cmds, cmd)
-		return m, tea.Batch(cmds...)
-	}
-
-	return m, nil
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -527,6 +525,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// State-specific key handling
 	switch m.state {
 	case stateLoginMenu:
 		switch msg.String() {
@@ -712,8 +711,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			case "enter":
 				if m.currentView == lobbyViewRooms && len(m.filteredRooms) > 0 {
 					selectedRoom := m.filteredRooms[m.roomIndex]
-					m.status = fmt.Sprintf("Joining room: %s", selectedRoom.Name)
-					// TODO: Transition to chat room view (future implementation)
+					m.state = stateChatRoom
+					m.status = fmt.Sprintf("Joining #%s...", selectedRoom.Name)
+					m.err = nil
+					m.chatModel = newChatModel(m.client, m.token, m.user, selectedRoom)
+					m.chatModel.SetSize(m.width, m.height)
+					return m, loadMessagesCmd(m.client, m.token, selectedRoom.ID)
 				} else if m.currentView == lobbyViewPeople && len(m.filteredUsers) > 0 {
 					selectedUser := m.filteredUsers[m.userIndex]
 					m.status = fmt.Sprintf("Starting DM with: %s", selectedUser.Username)
@@ -809,6 +812,9 @@ func (m Model) View() string {
 		}
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("↑/↓: navigate | Enter: select | q: quit"))
+
+	case stateChatRoom:
+		return m.chatModel.View()
 
 	case stateChatLobby:
 		b.WriteString(titleStyle.Render("Chat Lobby"))
