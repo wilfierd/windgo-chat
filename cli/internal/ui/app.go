@@ -28,6 +28,7 @@ const (
 	stateDeviceWaiting
 	stateMainMenu
 	stateChatLobby
+	stateConversation
 )
 
 type lobbyView int
@@ -40,17 +41,17 @@ const (
 var (
 	// Clean, minimalist color scheme - like Claude's interface
 	// No backgrounds, just simple foreground colors
-	
+
 	titleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("39")) // Bright cyan for headers
+			Bold(true).
+			Foreground(lipgloss.Color("39")) // Bright cyan for headers
 
 	menuStyle = lipgloss.NewStyle().Padding(1, 0)
 
 	// Selected items - just bold and colored, no background
 	selectedItem = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")). // Bright cyan/blue
-		Bold(true)
+			Foreground(lipgloss.Color("86")). // Bright cyan/blue
+			Bold(true)
 
 	// Normal items - default terminal color
 	normalItem = lipgloss.NewStyle().Foreground(lipgloss.Color("7")) // Default white/gray
@@ -75,8 +76,8 @@ var (
 
 	// Borders - simple, no fancy styles
 	borderStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("8"))
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("8"))
 
 	// Separators
 	separatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -128,6 +129,16 @@ type Model struct {
 
 	viewport      viewport.Model
 	viewportReady bool
+
+	// Conversation state
+	currentRoom     *api.Room
+	currentDMUser   *api.User
+	messages        []api.Message
+	messageInput    textinput.Model
+	messageViewport viewport.Model
+	lastMessageID   uint
+	pollingActive   bool
+	lastPollTime    time.Time
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -168,13 +179,20 @@ func NewModel(client *api.Client) Model {
 	search.CharLimit = 50
 	search.Width = 30
 
+	messageInput := textinput.New()
+	messageInput.Placeholder = "Type a message... (ESC to go back)"
+	messageInput.CharLimit = 1000
+	messageInput.Width = 80
+
 	return Model{
 		client:        client,
 		state:         stateLoading,
 		emailInput:    email,
 		passwordInput: password,
 		searchInput:   search,
+		messageInput:  messageInput,
 		currentView:   lobbyViewRooms,
+		pollingActive: false,
 	}
 }
 
@@ -215,6 +233,18 @@ type usersLoadedMsg struct {
 	users []api.User
 	err   error
 }
+
+type messagesLoadedMsg struct {
+	messages []api.Message
+	err      error
+}
+
+type messageSentMsg struct {
+	message *api.Message
+	err     error
+}
+
+type pollTickMsg time.Time
 
 func (m Model) Init() tea.Cmd {
 	return loadStoredCredentials()
@@ -303,6 +333,32 @@ func loadUsersCmd(client *api.Client, token string) tea.Cmd {
 		}
 		return usersLoadedMsg{users: users}
 	}
+}
+
+func loadMessagesCmd(client *api.Client, token string, roomID uint) tea.Cmd {
+	return func() tea.Msg {
+		messages, err := client.GetMessages(token, roomID, 1, 50)
+		if err != nil {
+			return messagesLoadedMsg{err: err}
+		}
+		return messagesLoadedMsg{messages: messages}
+	}
+}
+
+func sendMessageCmd(client *api.Client, token string, roomID uint, content string) tea.Cmd {
+	return func() tea.Msg {
+		message, err := client.SendMessage(token, roomID, content)
+		if err != nil {
+			return messageSentMsg{err: err}
+		}
+		return messageSentMsg{message: message}
+	}
+}
+
+func pollMessagesCmd() tea.Cmd {
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+		return pollTickMsg(t)
+	})
 }
 
 // applyFilters filters rooms and users based on search input
@@ -461,6 +517,76 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Found %d rooms, %d users. Press / to search, Tab to switch views.", len(m.rooms), len(m.users))
 		return m, nil
 
+	case messagesLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Failed to load messages"
+			return m, nil
+		}
+		m.messages = msg.messages
+		// Track the last message ID for deduplication
+		if len(m.messages) > 0 {
+			m.lastMessageID = m.messages[0].ID
+		}
+		m.updateMessageViewport()
+		m.status = ""
+		return m, nil
+
+	case messageSentMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to send message: %v", msg.err))
+			return m, nil
+		}
+		// Clear input on success
+		m.messageInput.SetValue("")
+		m.status = ""
+		// Add the new message to the list if not already there
+		found := false
+		for _, existing := range m.messages {
+			if existing.ID == msg.message.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.messages = append([]api.Message{*msg.message}, m.messages...)
+			m.lastMessageID = msg.message.ID
+			m.updateMessageViewport()
+		}
+		return m, nil
+
+	case pollTickMsg:
+		// Only poll if we're in conversation state and polling is active
+		if m.state == stateConversation && m.pollingActive && m.currentRoom != nil {
+			// Avoid polling too frequently
+			if time.Since(m.lastPollTime) >= 2*time.Second {
+				m.lastPollTime = time.Now()
+				return m, tea.Batch(
+					loadMessagesCmd(m.client, m.token, m.currentRoom.ID),
+					pollMessagesCmd(),
+				)
+			}
+			// Schedule next poll
+			return m, pollMessagesCmd()
+		}
+		return m, nil
+
+	case tea.WindowSizeMsg:
+		if !m.viewportReady {
+			m.viewport = viewport.New(msg.Width, msg.Height-10)
+			m.messageViewport = viewport.New(msg.Width-4, msg.Height-8)
+			m.viewportReady = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = msg.Height - 10
+			m.messageViewport.Width = msg.Width - 4
+			m.messageViewport.Height = msg.Height - 8
+		}
+		if m.state == stateConversation {
+			m.updateMessageViewport()
+		}
+		return m, nil
+
 	}
 
 	if isKey {
@@ -497,6 +623,21 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 				m.applyFilters()
+			}
+		}
+		// Handle message input in conversation
+		if m.state == stateConversation {
+			skipMessageInput := false
+			switch keyMsg.String() {
+			case "esc", "enter", "up", "k", "down", "j", "pgup", "pgdown":
+				skipMessageInput = true
+			}
+			if !skipMessageInput {
+				var cmd tea.Cmd
+				m.messageInput, cmd = m.messageInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 		var keyCmd tea.Cmd
@@ -712,12 +853,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			case "enter":
 				if m.currentView == lobbyViewRooms && len(m.filteredRooms) > 0 {
 					selectedRoom := m.filteredRooms[m.roomIndex]
-					m.status = fmt.Sprintf("Joining room: %s", selectedRoom.Name)
-					// TODO: Transition to chat room view (future implementation)
+					m.currentRoom = &selectedRoom
+					m.currentDMUser = nil
+					m.state = stateConversation
+					m.status = fmt.Sprintf("Loading room: %s", selectedRoom.Name)
+					m.messages = nil
+					m.messageInput.SetValue("")
+					m.messageInput.Focus()
+					m.pollingActive = true
+					m.lastPollTime = time.Now()
+					return m, tea.Batch(
+						loadMessagesCmd(m.client, m.token, selectedRoom.ID),
+						pollMessagesCmd(),
+					)
 				} else if m.currentView == lobbyViewPeople && len(m.filteredUsers) > 0 {
 					selectedUser := m.filteredUsers[m.userIndex]
-					m.status = fmt.Sprintf("Starting DM with: %s", selectedUser.Username)
-					// TODO: Implement DM functionality
+					m.status = fmt.Sprintf("Starting DM with: %s (DM not yet implemented)", selectedUser.Username)
+					// TODO: Implement DM functionality - needs backend support
 				}
 			case "q":
 				return m, tea.Quit
@@ -731,9 +883,101 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.searchInput.Blur()
 			}
 		}
+
+	case stateConversation:
+		switch msg.String() {
+		case "esc":
+			// Exit conversation and stop polling
+			m.pollingActive = false
+			m.state = stateChatLobby
+			m.currentRoom = nil
+			m.currentDMUser = nil
+			m.messages = nil
+			m.status = ""
+			m.messageInput.SetValue("")
+			m.messageInput.Blur()
+		case "enter":
+			// Send message
+			content := strings.TrimSpace(m.messageInput.Value())
+			if content != "" && m.currentRoom != nil {
+				// Check for commands
+				if strings.HasPrefix(content, "/") {
+					m.handleCommand(content)
+				} else {
+					return m, sendMessageCmd(m.client, m.token, m.currentRoom.ID, content)
+				}
+			}
+		case "up", "k":
+			m.messageViewport.LineUp(1)
+		case "down", "j":
+			m.messageViewport.LineDown(1)
+		case "pgup":
+			m.messageViewport.ViewUp()
+		case "pgdown":
+			m.messageViewport.ViewDown()
+		}
 	}
 
 	return m, nil
+}
+
+func (m *Model) handleCommand(cmd string) {
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return
+	}
+
+	command := strings.ToLower(parts[0])
+	switch command {
+	case "/vault":
+		m.status = helpStyle.Render("🔒 Vault feature coming soon...")
+	case "/help":
+		m.status = helpStyle.Render("Commands: /vault (coming soon), /help, /back, /quit | ESC to go back")
+	case "/back":
+		m.pollingActive = false
+		m.state = stateChatLobby
+		m.currentRoom = nil
+		m.messages = nil
+		m.messageInput.SetValue("")
+	case "/quit":
+		m.pollingActive = false
+	default:
+		m.status = errorStyle.Render(fmt.Sprintf("Unknown command: %s", command))
+	}
+	m.messageInput.SetValue("")
+}
+
+func (m *Model) updateMessageViewport() {
+	if m.currentRoom == nil {
+		return
+	}
+
+	var b strings.Builder
+
+	// Reverse messages so newest is at bottom
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		msg := m.messages[i]
+
+		// Format timestamp
+		timestamp := msg.CreatedAt.Format("15:04")
+
+		// Build message line
+		username := msg.User.Username
+		if msg.UserID == m.user.ID {
+			username = "You"
+		}
+
+		b.WriteString(helpStyle.Render(timestamp))
+		b.WriteString(" ")
+		b.WriteString(selectedItem.Render(username))
+		b.WriteString(": ")
+		b.WriteString(msg.Content)
+		b.WriteString("\n")
+	}
+
+	m.messageViewport.SetContent(b.String())
+	// Scroll to bottom to show newest messages
+	m.messageViewport.GotoBottom()
 }
 
 func (m Model) View() string {
@@ -895,10 +1139,10 @@ func (m Model) View() string {
 						onlineCount++
 					}
 				}
-				b.WriteString(fmt.Sprintf("Available users (%d, %s online):\n\n", 
+				b.WriteString(fmt.Sprintf("Available users (%d, %s online):\n\n",
 					len(m.filteredUsers),
 					onlineStyle.Render(fmt.Sprintf("%d", onlineCount))))
-				
+
 				// Show max 15 items for scrolling simulation
 				startIdx := 0
 				endIdx := len(m.filteredUsers)
@@ -921,7 +1165,7 @@ func (m Model) View() string {
 				}
 				for i := startIdx; i < endIdx; i++ {
 					user := m.filteredUsers[i]
-					
+
 					// Status indicator
 					var statusIcon string
 					if user.IsOnline {
@@ -929,7 +1173,7 @@ func (m Model) View() string {
 					} else {
 						statusIcon = offlineStyle.Render("○") // Empty circle
 					}
-					
+
 					// Last seen time
 					var lastSeen string
 					if user.LastActiveAt != nil {
@@ -944,14 +1188,14 @@ func (m Model) View() string {
 							lastSeen = fmt.Sprintf("%dd ago", int(duration.Hours()/24))
 						}
 					}
-					
+
 					userLine := fmt.Sprintf("%s %s", statusIcon, user.Username)
 					if lastSeen != "" && !user.IsOnline {
 						userLine += " " + helpStyle.Render("("+lastSeen+")")
 					} else if user.IsOnline {
 						userLine += " " + onlineStyle.Render("(online)")
 					}
-					
+
 					if i == m.userIndex {
 						b.WriteString(selectedItem.Render("> " + userLine))
 					} else {
@@ -967,6 +1211,40 @@ func (m Model) View() string {
 
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("Tab: switch view | ↑/↓: navigate | Enter: select | /: search | m/Esc: menu | q: quit"))
+
+	case stateConversation:
+		if m.currentRoom != nil {
+			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
+			b.WriteString(" ")
+			b.WriteString(statusStyle.Render("- " + m.user.Username))
+			b.WriteString("\n\n")
+		} else if m.currentDMUser != nil {
+			b.WriteString(titleStyle.Render("DM with " + m.currentDMUser.Username))
+			b.WriteString(" ")
+			b.WriteString(statusStyle.Render("- " + m.user.Username))
+			b.WriteString("\n\n")
+		}
+
+		// Display messages viewport
+		if m.viewportReady {
+			b.WriteString(borderStyle.Render(m.messageViewport.View()))
+			b.WriteString("\n\n")
+		} else {
+			if len(m.messages) == 0 {
+				b.WriteString(statusStyle.Render("No messages yet. Be the first to say something!"))
+				b.WriteString("\n\n")
+			} else {
+				b.WriteString(statusStyle.Render(fmt.Sprintf("Loaded %d messages", len(m.messages))))
+				b.WriteString("\n\n")
+			}
+		}
+
+		// Message input
+		b.WriteString(m.messageInput.View())
+		b.WriteString("\n\n")
+
+		// Help text
+		b.WriteString(helpStyle.Render("Enter: send | ↑/↓: scroll | /vault: vault (soon) | /help: commands | Esc: back"))
 	}
 
 	return menuStyle.Render(b.String())

@@ -62,6 +62,17 @@ type Room struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Message represents a chat message from the API.
+type Message struct {
+	ID        uint      `json:"id"`
+	UserID    uint      `json:"user_id"`
+	RoomID    uint      `json:"room_id"`
+	Content   string    `json:"content"`
+	User      User      `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // DeviceStartResponse is returned when initiating a GitHub device flow.
 type DeviceStartResponse struct {
 	DeviceCode              string `json:"device_code"`
@@ -244,4 +255,88 @@ func (c *Client) GetUsers(token, search string) ([]User, error) {
 		return nil, err
 	}
 	return response.Users, nil
+}
+
+// GetMessages fetches messages for a specific room using a bearer token.
+// Supports pagination with page and limit parameters.
+func (c *Client) GetMessages(token string, roomID uint, page, limit int) ([]Message, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+
+	url := fmt.Sprintf("%s/api/v1/rooms/%d/messages?page=%d&limit=%d", c.BaseURL, roomID, page, limit)
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Messages []Message `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response.Messages, nil
+}
+
+// SendMessage sends a new message to a room using a bearer token.
+func (c *Client) SendMessage(token string, roomID uint, content string) (*Message, error) {
+	reqBody := map[string]any{
+		"room_id": roomID,
+		"content": content,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/api/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Message string  `json:"message"`
+		Data    Message `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
 }
