@@ -102,4 +102,11 @@ playwright-report/
 
 # Agent docs
 AGENTS.md
+CLAUDE.md
 WARP.md
+
+# Implementation plans and internal docs
+M3_IMPLEMENTATION_PLAN.md
+*_PLAN.md
+*_MILESTONE.md
+IMPLEMENTATION_*.md

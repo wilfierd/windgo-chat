@@ -131,14 +131,18 @@ type Model struct {
 	viewportReady bool
 
 	// Conversation state
-	currentRoom     *api.Room
-	currentDMUser   *api.User
-	messages        []api.Message
-	messageInput    textinput.Model
-	messageViewport viewport.Model
-	lastMessageID   uint
-	pollingActive   bool
-	lastPollTime    time.Time
+	currentRoom      *api.Room
+	currentDMUser    *api.User
+	messages         []api.Message
+	messageInput     textinput.Model
+	messageViewport  viewport.Model
+	lastMessageID    uint
+	pollingActive    bool
+	lastPollTime     time.Time
+	currentPage      int  // Current page of messages loaded
+	loadingMore      bool // Whether we're loading more messages
+	hasMoreMessages  bool // Whether there are more messages to load
+	lastScrollOffset float64 // Store scroll position before loading more
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -244,6 +248,12 @@ type messageSentMsg struct {
 	err     error
 }
 
+type moreMessagesLoadedMsg struct {
+	messages []api.Message
+	page     int
+	err      error
+}
+
 type pollTickMsg time.Time
 
 func (m Model) Init() tea.Cmd {
@@ -342,6 +352,16 @@ func loadMessagesCmd(client *api.Client, token string, roomID uint) tea.Cmd {
 			return messagesLoadedMsg{err: err}
 		}
 		return messagesLoadedMsg{messages: messages}
+	}
+}
+
+func loadMoreMessagesCmd(client *api.Client, token string, roomID uint, page int) tea.Cmd {
+	return func() tea.Msg {
+		messages, err := client.GetMessages(token, roomID, page, 50)
+		if err != nil {
+			return moreMessagesLoadedMsg{page: page, err: err}
+		}
+		return moreMessagesLoadedMsg{messages: messages, page: page}
 	}
 }
 
@@ -524,6 +544,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.messages = msg.messages
+		m.currentPage = 1 // Reset to page 1
+		m.hasMoreMessages = len(msg.messages) >= 50 // If we got 50, there might be more
 		// Track the last message ID for deduplication
 		if len(m.messages) > 0 {
 			m.lastMessageID = m.messages[0].ID
@@ -553,6 +575,39 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastMessageID = msg.message.ID
 			m.updateMessageViewport()
 		}
+		return m, nil
+
+	case moreMessagesLoadedMsg:
+		m.loadingMore = false
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to load more messages: %v", msg.err))
+			return m, nil
+		}
+		if len(msg.messages) == 0 {
+			m.hasMoreMessages = false
+			m.status = helpStyle.Render("No more messages to load")
+			return m, nil
+		}
+		// Store current scroll position
+		scrollPercent := m.messageViewport.ScrollPercent()
+
+		// Append older messages to the end of the array
+		// (remember: messages[0] is newest, messages[len-1] is oldest)
+		m.messages = append(m.messages, msg.messages...)
+		m.currentPage = msg.page
+
+		// Check if there might be more messages
+		m.hasMoreMessages = len(msg.messages) >= 50
+
+		// Update viewport content
+		m.updateMessageViewport()
+
+		// Try to restore approximate scroll position
+		// Since we added content above, we need to scroll down a bit
+		// to keep the user's view stable
+		m.messageViewport.SetYOffset(int(float64(m.messageViewport.TotalLineCount()) * scrollPercent))
+
+		m.status = helpStyle.Render(fmt.Sprintf("Loaded %d older messages (page %d)", len(msg.messages), msg.page))
 		return m, nil
 
 	case pollTickMsg:
@@ -909,10 +964,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		case "up", "k":
 			m.messageViewport.LineUp(1)
+			// Check if we're at the top and should load more messages
+			if m.messageViewport.AtTop() && !m.loadingMore && m.hasMoreMessages && m.currentRoom != nil {
+				m.loadingMore = true
+				m.status = helpStyle.Render("Loading older messages...")
+				return m, loadMoreMessagesCmd(m.client, m.token, m.currentRoom.ID, m.currentPage+1)
+			}
 		case "down", "j":
 			m.messageViewport.LineDown(1)
 		case "pgup":
 			m.messageViewport.ViewUp()
+			// Check if we're at the top after page up
+			if m.messageViewport.AtTop() && !m.loadingMore && m.hasMoreMessages && m.currentRoom != nil {
+				m.loadingMore = true
+				m.status = helpStyle.Render("Loading older messages...")
+				return m, loadMoreMessagesCmd(m.client, m.token, m.currentRoom.ID, m.currentPage+1)
+			}
 		case "pgdown":
 			m.messageViewport.ViewDown()
 		}
