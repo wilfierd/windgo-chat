@@ -15,7 +15,7 @@ func TrackActivity() fiber.Handler {
 		err := c.Next()
 
 		// After request is processed, update user activity
-		userID := c.Locals("user_id")
+		userID := c.Locals("userID")
 		if userID != nil {
 			now := time.Now()
 			// Update asynchronously to not slow down response

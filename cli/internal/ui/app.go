@@ -143,6 +143,10 @@ type Model struct {
 	loadingMore      bool // Whether we're loading more messages
 	hasMoreMessages  bool // Whether there are more messages to load
 	lastScrollOffset float64 // Store scroll position before loading more
+
+	// User status polling
+	userPollingActive bool      // Whether user status polling is active
+	lastUserPollTime  time.Time // Last time we polled for user status
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -255,6 +259,8 @@ type moreMessagesLoadedMsg struct {
 }
 
 type pollTickMsg time.Time
+
+type userPollTickMsg time.Time
 
 func (m Model) Init() tea.Cmd {
 	return loadStoredCredentials()
@@ -381,6 +387,12 @@ func pollMessagesCmd() tea.Cmd {
 	})
 }
 
+func pollUsersCmd() tea.Cmd {
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+		return userPollTickMsg(t)
+	})
+}
+
 // applyFilters filters rooms and users based on search input
 func (m *Model) applyFilters() {
 	query := strings.ToLower(m.searchInput.Value())
@@ -459,7 +471,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateMainMenu
 		m.menuIndex = 0
 		m.status = "" // Clear status, the menu shows who's logged in
-		return m, nil
+		// Start user status polling after successful credential verification
+		m.userPollingActive = true
+		m.lastUserPollTime = time.Now()
+		return m, pollUsersCmd()
 
 	case deviceStartMsg:
 		m.submitting = false
@@ -490,7 +505,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateMainMenu
 		m.menuIndex = 0
 		m.status = "" // Clear status, the menu shows who's logged in
-		return m, saveCredentialsCmd(msg.resp)
+		// Start user status polling after successful login
+		m.userPollingActive = true
+		m.lastUserPollTime = time.Now()
+		return m, tea.Batch(saveCredentialsCmd(msg.resp), pollUsersCmd())
 
 	case credsSavedMsg:
 		if msg.err != nil {
@@ -528,13 +546,40 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case usersLoadedMsg:
 		if msg.err != nil {
 			// Non-critical error, users list is optional
-			m.status = fmt.Sprintf("Found %d rooms. Press / to search, Tab to switch views.", len(m.rooms))
+			if len(m.rooms) > 0 {
+				m.status = fmt.Sprintf("Found %d rooms. Press / to search, Tab to switch views.", len(m.rooms))
+			}
 			return m, nil
 		}
+
+		// Store current selected user if any
+		var currentSelectedUsername string
+		if len(m.filteredUsers) > 0 && m.userIndex < len(m.filteredUsers) {
+			currentSelectedUsername = m.filteredUsers[m.userIndex].Username
+		}
+
 		m.users = msg.users
-		m.filteredUsers = msg.users
-		m.userIndex = 0
-		m.status = fmt.Sprintf("Found %d rooms, %d users. Press / to search, Tab to switch views.", len(m.rooms), len(m.users))
+		m.applyFilters()
+
+		// Try to restore selection to the same user
+		if currentSelectedUsername != "" {
+			for i, user := range m.filteredUsers {
+				if user.Username == currentSelectedUsername {
+					m.userIndex = i
+					break
+				}
+			}
+		}
+
+		// Ensure index is in bounds
+		if m.userIndex >= len(m.filteredUsers) {
+			m.userIndex = 0
+		}
+
+		// Only update status message if we're entering the lobby for the first time
+		if m.state != stateChatLobby {
+			m.status = fmt.Sprintf("Found %d rooms, %d users. Press / to search, Tab to switch views.", len(m.rooms), len(m.users))
+		}
 		return m, nil
 
 	case messagesLoadedMsg:
@@ -623,6 +668,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Schedule next poll
 			return m, pollMessagesCmd()
+		}
+		return m, nil
+
+	case userPollTickMsg:
+		// Poll for user status updates if polling is active
+		if m.userPollingActive {
+			// Avoid polling too frequently
+			if time.Since(m.lastUserPollTime) >= 25*time.Second {
+				m.lastUserPollTime = time.Now()
+				return m, tea.Batch(
+					loadUsersCmd(m.client, m.token),
+					pollUsersCmd(),
+				)
+			}
+			// Schedule next poll
+			return m, pollUsersCmd()
 		}
 		return m, nil
 
@@ -855,7 +916,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.state = stateLoginMenu
 				m.menuIndex = 0
 				m.status = "Logged out successfully. Choose how you want to sign in."
-				// Clear stored credentials
+				// Stop polling and clear stored credentials
+				m.userPollingActive = false
 				_ = storage.Save(storage.Credentials{})
 			}
 		case "ctrl+c", "q":
