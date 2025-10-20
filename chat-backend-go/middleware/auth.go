@@ -61,3 +61,39 @@ func OptionalAuth() fiber.Handler {
 		return c.Next()
 	}
 }
+
+// WebSocketAuth middleware validates JWT token from query parameter for WebSocket connections
+func WebSocketAuth() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Try to get token from query parameter first (for WebSocket)
+		tokenString := c.Query("token")
+
+		// If not in query, try Authorization header as fallback
+		if tokenString == "" {
+			authHeader := c.Get("Authorization")
+			if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+
+		// If still no token, return error
+		if tokenString == "" {
+			return c.Status(401).JSON(fiber.Map{
+				"error": "Token required in query parameter or Authorization header",
+			})
+		}
+
+		// Validate token and extract user ID
+		userID, err := utils.ValidateJWT(tokenString)
+		if err != nil {
+			return c.Status(401).JSON(fiber.Map{
+				"error": "Invalid or expired token",
+			})
+		}
+
+		// Store user ID in context for use in handlers
+		c.Locals("userID", userID)
+
+		return c.Next()
+	}
+}

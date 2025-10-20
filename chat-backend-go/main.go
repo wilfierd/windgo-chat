@@ -2,6 +2,7 @@ package main
 
 import (
 	"chat-backend-go/config"
+	"chat-backend-go/handlers"
 	"chat-backend-go/routes"
 	"chat-backend-go/utils"
 	"log"
@@ -19,6 +20,10 @@ func main() {
 	// Seed demo users and rooms
 	utils.SeedDemoUsers()
 	utils.SeedDemoRooms()
+
+	// Initialize WebSocket hub
+	handlers.InitWebSocketHub()
+	log.Println("WebSocket hub initialized")
 
 	// Create Fiber app
 	app := fiber.New()
@@ -58,6 +63,8 @@ func main() {
 	routes.SetupAuthRoutes(app)
 	routes.UserRoutes(app)
 	routes.MessageRoutes(app)
+	routes.SetupWebSocketRoutes(app)
+	log.Println("All routes registered including WebSocket")
 
 	// Read port from environment (default 8080)
 	port := os.Getenv("PORT")

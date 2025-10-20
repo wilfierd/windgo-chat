@@ -97,7 +97,8 @@ var mainMenuOptions = []string{
 
 // Model holds application state for the login experience.
 type Model struct {
-	client *api.Client
+	client   *api.Client
+	wsClient *api.WSClient
 
 	state      viewState
 	menuIndex  int
@@ -137,14 +138,12 @@ type Model struct {
 	messageInput     textinput.Model
 	messageViewport  viewport.Model
 	lastMessageID    uint
-	pollingActive    bool
-	lastPollTime     time.Time
-	currentPage      int  // Current page of messages loaded
-	loadingMore      bool // Whether we're loading more messages
-	hasMoreMessages  bool // Whether there are more messages to load
+	currentPage      int     // Current page of messages loaded
+	loadingMore      bool    // Whether we're loading more messages
+	hasMoreMessages  bool    // Whether there are more messages to load
 	lastScrollOffset float64 // Store scroll position before loading more
 
-	// User status polling
+	// User status polling (keep for now, can be replaced with WebSocket later)
 	userPollingActive bool      // Whether user status polling is active
 	lastUserPollTime  time.Time // Last time we polled for user status
 }
@@ -200,7 +199,6 @@ func NewModel(client *api.Client) Model {
 		searchInput:   search,
 		messageInput:  messageInput,
 		currentView:   lobbyViewRooms,
-		pollingActive: false,
 	}
 }
 
@@ -247,6 +245,20 @@ type messagesLoadedMsg struct {
 	err      error
 }
 
+type wsConnectedMsg struct {
+	err      error
+	wsClient *api.WSClient
+}
+
+type wsMessageReceivedMsg struct {
+	msg api.WSMessage
+}
+
+type wsRoomJoinedMsg struct {
+	roomID uint
+	err    error
+}
+
 type messageSentMsg struct {
 	message *api.Message
 	err     error
@@ -258,12 +270,21 @@ type moreMessagesLoadedMsg struct {
 	err      error
 }
 
-type pollTickMsg time.Time
-
 type userPollTickMsg time.Time
 
 func (m Model) Init() tea.Cmd {
 	return loadStoredCredentials()
+}
+
+// waitForWSMessage waits for the next WebSocket message
+func waitForWSMessage(sub <-chan api.WSMessage) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-sub
+		if !ok {
+			return nil // Channel closed
+		}
+		return wsMessageReceivedMsg{msg: msg}
+	}
 }
 
 func loadStoredCredentials() tea.Cmd {
@@ -381,10 +402,36 @@ func sendMessageCmd(client *api.Client, token string, roomID uint, content strin
 	}
 }
 
-func pollMessagesCmd() tea.Cmd {
-	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-		return pollTickMsg(t)
-	})
+func connectWebSocketCmd(baseURL, token string) tea.Cmd {
+	return func() tea.Msg {
+		wsClient := api.NewWSClient(baseURL, token)
+
+		if err := wsClient.Connect(); err != nil {
+			return wsConnectedMsg{err: err, wsClient: nil}
+		}
+
+		return wsConnectedMsg{err: nil, wsClient: wsClient}
+	}
+}
+
+func joinRoomCmd(wsClient *api.WSClient, roomID uint) tea.Cmd {
+	return func() tea.Msg {
+		if wsClient == nil || !wsClient.IsConnected() {
+			return wsRoomJoinedMsg{roomID: roomID, err: errors.New("websocket not connected")}
+		}
+		err := wsClient.JoinRoom(roomID)
+		return wsRoomJoinedMsg{roomID: roomID, err: err}
+	}
+}
+
+func leaveRoomCmd(wsClient *api.WSClient, roomID uint) tea.Cmd {
+	return func() tea.Msg {
+		if wsClient == nil || !wsClient.IsConnected() {
+			return nil
+		}
+		wsClient.LeaveRoom(roomID)
+		return nil
+	}
 }
 
 func pollUsersCmd() tea.Cmd {
@@ -471,10 +518,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateMainMenu
 		m.menuIndex = 0
 		m.status = "" // Clear status, the menu shows who's logged in
-		// Start user status polling after successful credential verification
+		// Start user status polling and connect WebSocket after successful login
 		m.userPollingActive = true
 		m.lastUserPollTime = time.Now()
-		return m, pollUsersCmd()
+		return m, tea.Batch(
+			pollUsersCmd(),
+			connectWebSocketCmd(m.client.BaseURL, m.token),
+		)
 
 	case deviceStartMsg:
 		m.submitting = false
@@ -505,10 +555,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateMainMenu
 		m.menuIndex = 0
 		m.status = "" // Clear status, the menu shows who's logged in
-		// Start user status polling after successful login
+		// Start user status polling and connect WebSocket after successful login
 		m.userPollingActive = true
 		m.lastUserPollTime = time.Now()
-		return m, tea.Batch(saveCredentialsCmd(msg.resp), pollUsersCmd())
+		return m, tea.Batch(
+			saveCredentialsCmd(msg.resp),
+			pollUsersCmd(),
+			connectWebSocketCmd(m.client.BaseURL, m.token),
+		)
 
 	case credsSavedMsg:
 		if msg.err != nil {
@@ -589,7 +643,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.messages = msg.messages
-		m.currentPage = 1 // Reset to page 1
+		m.currentPage = 1                           // Reset to page 1
 		m.hasMoreMessages = len(msg.messages) >= 50 // If we got 50, there might be more
 		// Track the last message ID for deduplication
 		if len(m.messages) > 0 {
@@ -655,19 +709,77 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = helpStyle.Render(fmt.Sprintf("Loaded %d older messages (page %d)", len(msg.messages), msg.page))
 		return m, nil
 
-	case pollTickMsg:
-		// Only poll if we're in conversation state and polling is active
-		if m.state == stateConversation && m.pollingActive && m.currentRoom != nil {
-			// Avoid polling too frequently
-			if time.Since(m.lastPollTime) >= 2*time.Second {
-				m.lastPollTime = time.Now()
-				return m, tea.Batch(
-					loadMessagesCmd(m.client, m.token, m.currentRoom.ID),
-					pollMessagesCmd(),
-				)
+	case wsConnectedMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("WebSocket connection failed: %v", msg.err)
+			return m, nil
+		}
+		// WebSocket connected successfully
+		m.wsClient = msg.wsClient
+		m.status = "WebSocket connected"
+
+		// Start listening for WebSocket messages using subscription channel
+		return m, waitForWSMessage(m.wsClient.Subscribe())
+
+	case wsMessageReceivedMsg:
+		// Handle incoming WebSocket messages
+		var nextCmd tea.Cmd
+
+		if msg.msg.Type == "message" {
+			// Parse the message content
+			if contentMap, ok := msg.msg.Content.(map[string]interface{}); ok {
+				// Convert to api.Message
+				var apiMsg api.Message
+				if id, ok := contentMap["id"].(float64); ok {
+					apiMsg.ID = uint(id)
+				}
+				if userID, ok := contentMap["user_id"].(float64); ok {
+					apiMsg.UserID = uint(userID)
+				}
+				if roomID, ok := contentMap["room_id"].(float64); ok {
+					apiMsg.RoomID = uint(roomID)
+				}
+				if content, ok := contentMap["content"].(string); ok {
+					apiMsg.Content = content
+				}
+				if user, ok := contentMap["user"].(map[string]interface{}); ok {
+					if username, ok := user["username"].(string); ok {
+						apiMsg.User.Username = username
+					}
+					if userID, ok := user["id"].(float64); ok {
+						apiMsg.User.ID = uint(userID)
+					}
+				}
+
+				// Add message to current conversation if it's for the current room
+				if m.currentRoom != nil && apiMsg.RoomID == m.currentRoom.ID {
+					// Check for duplicates
+					isDuplicate := false
+					for _, existingMsg := range m.messages {
+						if existingMsg.ID == apiMsg.ID {
+							isDuplicate = true
+							break
+						}
+					}
+
+					if !isDuplicate {
+						m.messages = append(m.messages, apiMsg)
+						m.updateMessageViewport()
+					}
+				}
 			}
-			// Schedule next poll
-			return m, pollMessagesCmd()
+		}
+
+		// Continue listening for more WebSocket messages
+		if m.wsClient != nil && m.wsClient.IsConnected() {
+			nextCmd = waitForWSMessage(m.wsClient.Subscribe())
+		}
+
+		return m, nextCmd
+
+	case wsRoomJoinedMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Failed to join room via WebSocket: %v", msg.err)
 		}
 		return m, nil
 
@@ -916,9 +1028,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.state = stateLoginMenu
 				m.menuIndex = 0
 				m.status = "Logged out successfully. Choose how you want to sign in."
-				// Stop polling and clear stored credentials
+				// Stop polling, disconnect WebSocket, and clear stored credentials
 				m.userPollingActive = false
+				if m.wsClient != nil {
+					m.wsClient.Disconnect()
+					m.wsClient = nil
+				}
 				_ = storage.Save(storage.Credentials{})
+				return m, nil
 			}
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -977,11 +1094,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 					m.messages = nil
 					m.messageInput.SetValue("")
 					m.messageInput.Focus()
-					m.pollingActive = true
-					m.lastPollTime = time.Now()
+					m.currentPage = 1
+					m.hasMoreMessages = true
+					// Load initial messages via REST and join room via WebSocket
 					return m, tea.Batch(
 						loadMessagesCmd(m.client, m.token, selectedRoom.ID),
-						pollMessagesCmd(),
+						joinRoomCmd(m.wsClient, selectedRoom.ID),
 					)
 				} else if m.currentView == lobbyViewPeople && len(m.filteredUsers) > 0 {
 					selectedUser := m.filteredUsers[m.userIndex]
@@ -1004,8 +1122,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case stateConversation:
 		switch msg.String() {
 		case "esc":
-			// Exit conversation and stop polling
-			m.pollingActive = false
+			// Exit conversation and leave room via WebSocket
+			var cmd tea.Cmd
+			if m.currentRoom != nil && m.wsClient != nil {
+				cmd = leaveRoomCmd(m.wsClient, m.currentRoom.ID)
+			}
 			m.state = stateChatLobby
 			m.currentRoom = nil
 			m.currentDMUser = nil
@@ -1013,6 +1134,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.status = ""
 			m.messageInput.SetValue("")
 			m.messageInput.Blur()
+			return m, cmd
 		case "enter":
 			// Send message
 			content := strings.TrimSpace(m.messageInput.Value())
@@ -1063,13 +1185,17 @@ func (m *Model) handleCommand(cmd string) {
 	case "/help":
 		m.status = helpStyle.Render("Commands: /vault (coming soon), /help, /back, /quit | ESC to go back")
 	case "/back":
-		m.pollingActive = false
+		if m.currentRoom != nil && m.wsClient != nil {
+			m.wsClient.LeaveRoom(m.currentRoom.ID)
+		}
 		m.state = stateChatLobby
 		m.currentRoom = nil
 		m.messages = nil
 		m.messageInput.SetValue("")
 	case "/quit":
-		m.pollingActive = false
+		if m.wsClient != nil {
+			m.wsClient.Disconnect()
+		}
 	default:
 		m.status = errorStyle.Render(fmt.Sprintf("Unknown command: %s", command))
 	}
