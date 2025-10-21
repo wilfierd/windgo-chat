@@ -29,6 +29,8 @@ const (
 	stateMainMenu
 	stateChatLobby
 	stateConversation
+	stateEditingMessage
+	stateConfirmDelete
 )
 
 type lobbyView int
@@ -146,6 +148,11 @@ type Model struct {
 	// User status polling (keep for now, can be replaced with WebSocket later)
 	userPollingActive bool      // Whether user status polling is active
 	lastUserPollTime  time.Time // Last time we polled for user status
+
+	// Message editing and deletion
+	selectedMessageIndex int             // Currently selected message for edit/delete
+	editingMessage       *api.Message    // Message being edited
+	editInput            textinput.Model // Text input for editing message
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -191,14 +198,21 @@ func NewModel(client *api.Client) Model {
 	messageInput.CharLimit = 1000
 	messageInput.Width = 80
 
+	editInput := textinput.New()
+	editInput.Placeholder = "Edit message..."
+	editInput.CharLimit = 1000
+	editInput.Width = 80
+
 	return Model{
-		client:        client,
-		state:         stateLoading,
-		emailInput:    email,
-		passwordInput: password,
-		searchInput:   search,
-		messageInput:  messageInput,
-		currentView:   lobbyViewRooms,
+		client:               client,
+		state:                stateLoading,
+		emailInput:           email,
+		passwordInput:        password,
+		searchInput:          search,
+		messageInput:         messageInput,
+		editInput:            editInput,
+		currentView:          lobbyViewRooms,
+		selectedMessageIndex: -1,
 	}
 }
 
@@ -268,6 +282,16 @@ type moreMessagesLoadedMsg struct {
 	messages []api.Message
 	page     int
 	err      error
+}
+
+type messageUpdatedMsg struct {
+	message *api.Message
+	err     error
+}
+
+type messageDeletedMsg struct {
+	messageID uint
+	err       error
 }
 
 type userPollTickMsg time.Time
@@ -399,6 +423,26 @@ func sendMessageCmd(client *api.Client, token string, roomID uint, content strin
 			return messageSentMsg{err: err}
 		}
 		return messageSentMsg{message: message}
+	}
+}
+
+func updateMessageCmd(client *api.Client, token string, messageID uint, content string) tea.Cmd {
+	return func() tea.Msg {
+		message, err := client.UpdateMessage(token, messageID, content)
+		if err != nil {
+			return messageUpdatedMsg{err: err}
+		}
+		return messageUpdatedMsg{message: message}
+	}
+}
+
+func deleteMessageCmd(client *api.Client, token string, messageID uint) tea.Cmd {
+	return func() tea.Msg {
+		err := client.DeleteMessage(token, messageID)
+		if err != nil {
+			return messageDeletedMsg{err: err}
+		}
+		return messageDeletedMsg{messageID: messageID}
 	}
 }
 
@@ -799,6 +843,47 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case messageUpdatedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to update message: %v", msg.err))
+			m.state = stateConversation
+			return m, nil
+		}
+		// Update the message in the list
+		for i, existingMsg := range m.messages {
+			if existingMsg.ID == msg.message.ID {
+				m.messages[i] = *msg.message
+				break
+			}
+		}
+		m.updateMessageViewport()
+		m.status = successStyle.Render("Message updated successfully")
+		m.state = stateConversation
+		m.editingMessage = nil
+		m.selectedMessageIndex = -1
+		m.messageInput.Focus() // Refocus input after successful edit
+		return m, nil
+
+	case messageDeletedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to delete message: %v", msg.err))
+			m.state = stateConversation
+			return m, nil
+		}
+		// Remove the message from the list
+		for i, existingMsg := range m.messages {
+			if existingMsg.ID == msg.messageID {
+				m.messages = append(m.messages[:i], m.messages[i+1:]...)
+				break
+			}
+		}
+		m.updateMessageViewport()
+		m.status = successStyle.Render("Message deleted successfully")
+		m.state = stateConversation
+		m.selectedMessageIndex = -1
+		m.messageInput.Focus() // Refocus input after successful delete
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		if !m.viewportReady {
 			m.viewport = viewport.New(msg.Width, msg.Height-10)
@@ -857,12 +942,27 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateConversation {
 			skipMessageInput := false
 			switch keyMsg.String() {
-			case "esc", "enter", "up", "k", "down", "j", "pgup", "pgdown":
+			case "esc", "enter", "up", "k", "down", "j", "pgup", "pgdown", "e", "d":
 				skipMessageInput = true
 			}
 			if !skipMessageInput {
 				var cmd tea.Cmd
 				m.messageInput, cmd = m.messageInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		// Handle edit input in editing state
+		if m.state == stateEditingMessage {
+			skipEditInput := false
+			switch keyMsg.String() {
+			case "esc", "enter":
+				skipEditInput = true
+			}
+			if !skipEditInput {
+				var cmd tea.Cmd
+				m.editInput, cmd = m.editInput.Update(message)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -1134,6 +1234,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.status = ""
 			m.messageInput.SetValue("")
 			m.messageInput.Blur()
+			m.selectedMessageIndex = -1
 			return m, cmd
 		case "enter":
 			// Send message
@@ -1147,16 +1248,72 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 			}
 		case "up", "k":
-			m.messageViewport.LineUp(1)
-			// Check if we're at the top and should load more messages
-			if m.messageViewport.AtTop() && !m.loadingMore && m.hasMoreMessages && m.currentRoom != nil {
-				m.loadingMore = true
-				m.status = helpStyle.Render("Loading older messages...")
-				return m, loadMoreMessagesCmd(m.client, m.token, m.currentRoom.ID, m.currentPage+1)
+			// If no message is selected, select the newest message (bottom of screen)
+			if m.selectedMessageIndex == -1 && len(m.messages) > 0 {
+				m.selectedMessageIndex = 0
+				m.messageInput.Blur() // Blur input when selecting messages
+				m.status = helpStyle.Render("Press 'e' to edit, 'd' to delete, or arrow keys to navigate messages")
+				m.updateMessageViewport() // Refresh viewport to show selection
+			} else if m.selectedMessageIndex < len(m.messages)-1 {
+				// Move UP on screen = older message = higher index
+				m.selectedMessageIndex++
+				m.updateMessageViewport() // Refresh viewport to show selection
+			} else {
+				// Already at oldest message, scroll viewport
+				m.messageViewport.LineUp(1)
+				// Check if we're at the top and should load more messages
+				if m.messageViewport.AtTop() && !m.loadingMore && m.hasMoreMessages && m.currentRoom != nil {
+					m.loadingMore = true
+					m.status = helpStyle.Render("Loading older messages...")
+					return m, loadMoreMessagesCmd(m.client, m.token, m.currentRoom.ID, m.currentPage+1)
+				}
 			}
 		case "down", "j":
-			m.messageViewport.LineDown(1)
+			if m.selectedMessageIndex > 0 {
+				// Move DOWN on screen = newer message = lower index
+				m.selectedMessageIndex--
+				m.updateMessageViewport() // Refresh viewport to show selection
+			} else if m.selectedMessageIndex == 0 {
+				// At newest message, deselect and scroll viewport
+				m.selectedMessageIndex = -1
+				m.messageInput.Focus() // Refocus input when deselecting
+				m.status = ""
+				m.updateMessageViewport() // Refresh viewport to clear selection
+				m.messageViewport.LineDown(1)
+			} else {
+				m.messageViewport.LineDown(1)
+			}
+		case "e":
+			// Edit selected message if it belongs to the user
+			if m.selectedMessageIndex >= 0 && m.selectedMessageIndex < len(m.messages) {
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.editingMessage = &selectedMsg
+					m.editInput.SetValue(selectedMsg.Content)
+					m.editInput.Focus()
+					m.state = stateEditingMessage
+					m.status = "Editing message... (ESC to cancel, Enter to save)"
+				} else {
+					m.status = errorStyle.Render("You can only edit your own messages")
+				}
+			}
+		case "d":
+			// Delete selected message if it belongs to the user
+			if m.selectedMessageIndex >= 0 && m.selectedMessageIndex < len(m.messages) {
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.editingMessage = &selectedMsg
+					m.state = stateConfirmDelete
+					m.status = "Delete this message? (y/n)"
+				} else {
+					m.status = errorStyle.Render("You can only delete your own messages")
+				}
+			}
 		case "pgup":
+			m.selectedMessageIndex = -1
+			m.messageInput.Focus() // Refocus input when deselecting
+			m.status = ""
+			m.updateMessageViewport() // Refresh viewport to clear selection
 			m.messageViewport.ViewUp()
 			// Check if we're at the top after page up
 			if m.messageViewport.AtTop() && !m.loadingMore && m.hasMoreMessages && m.currentRoom != nil {
@@ -1165,7 +1322,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return m, loadMoreMessagesCmd(m.client, m.token, m.currentRoom.ID, m.currentPage+1)
 			}
 		case "pgdown":
+			m.selectedMessageIndex = -1
+			m.messageInput.Focus() // Refocus input when deselecting
+			m.status = ""
+			m.updateMessageViewport() // Refresh viewport to clear selection
 			m.messageViewport.ViewDown()
+		}
+
+	case stateEditingMessage:
+		switch msg.String() {
+		case "esc":
+			m.state = stateConversation
+			m.editingMessage = nil
+			m.editInput.Blur()
+			m.messageInput.Focus() // Refocus message input when canceling edit
+			m.status = ""
+		case "enter":
+			content := strings.TrimSpace(m.editInput.Value())
+			if content != "" && m.editingMessage != nil {
+				return m, updateMessageCmd(m.client, m.token, m.editingMessage.ID, content)
+			}
+		}
+
+	case stateConfirmDelete:
+		switch msg.String() {
+		case "y", "Y":
+			if m.editingMessage != nil {
+				return m, deleteMessageCmd(m.client, m.token, m.editingMessage.ID)
+			}
+		case "n", "N", "esc":
+			m.state = stateConversation
+			m.editingMessage = nil
+			m.messageInput.Focus() // Refocus message input when canceling delete
+			m.status = ""
 		}
 	}
 
@@ -1222,11 +1411,27 @@ func (m *Model) updateMessageViewport() {
 			username = "You"
 		}
 
-		b.WriteString(helpStyle.Render(timestamp))
-		b.WriteString(" ")
-		b.WriteString(selectedItem.Render(username))
-		b.WriteString(": ")
-		b.WriteString(msg.Content)
+		// Check if this message is selected for edit/delete
+		isSelected := m.selectedMessageIndex == i
+
+		// Build the message line
+		var messageLine strings.Builder
+		messageLine.WriteString(helpStyle.Render(timestamp))
+		messageLine.WriteString(" ")
+		messageLine.WriteString(selectedItem.Render(username))
+		messageLine.WriteString(": ")
+		messageLine.WriteString(msg.Content)
+
+		// Highlight if selected
+		if isSelected {
+			// Add visual indicator for selected message
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("11")). // Bright yellow
+				Bold(true).
+				Render("> " + messageLine.String()))
+		} else {
+			b.WriteString("  " + messageLine.String())
+		}
 		b.WriteString("\n")
 	}
 
@@ -1498,8 +1703,57 @@ func (m Model) View() string {
 		b.WriteString(m.messageInput.View())
 		b.WriteString("\n\n")
 
+		// Help text with edit/delete options
+		if m.selectedMessageIndex >= 0 {
+			b.WriteString(helpStyle.Render("↑/↓: navigate | e: edit | d: delete | Enter: send | Esc: back"))
+		} else {
+			b.WriteString(helpStyle.Render("Enter: send | ↑/↓: scroll/select | /vault: vault (soon) | /help: commands | Esc: back"))
+		}
+
+	case stateEditingMessage:
+		if m.currentRoom != nil {
+			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
+			b.WriteString(" ")
+			b.WriteString(statusStyle.Render("- Editing Message"))
+			b.WriteString("\n\n")
+		}
+
+		// Show the original message being edited
+		if m.editingMessage != nil {
+			b.WriteString(statusStyle.Render(fmt.Sprintf("Editing message from %s:", m.editingMessage.User.Username)))
+			b.WriteString("\n")
+			b.WriteString(normalItem.Render(fmt.Sprintf("Original: %s", m.editingMessage.Content)))
+			b.WriteString("\n\n")
+		}
+
+		// Edit input
+		b.WriteString("New content:\n")
+		b.WriteString(m.editInput.View())
+		b.WriteString("\n\n")
+
 		// Help text
-		b.WriteString(helpStyle.Render("Enter: send | ↑/↓: scroll | /vault: vault (soon) | /help: commands | Esc: back"))
+		b.WriteString(helpStyle.Render("Enter: save changes | Esc: cancel"))
+
+	case stateConfirmDelete:
+		if m.currentRoom != nil {
+			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
+			b.WriteString(" ")
+			b.WriteString(statusStyle.Render("- Delete Message"))
+			b.WriteString("\n\n")
+		}
+
+		// Show the message being deleted
+		if m.editingMessage != nil {
+			b.WriteString(errorStyle.Render("⚠ Are you sure you want to delete this message?"))
+			b.WriteString("\n\n")
+			b.WriteString(statusStyle.Render(fmt.Sprintf("From: %s", m.editingMessage.User.Username)))
+			b.WriteString("\n")
+			b.WriteString(normalItem.Render(fmt.Sprintf("Content: %s", m.editingMessage.Content)))
+			b.WriteString("\n\n")
+		}
+
+		// Confirmation prompt
+		b.WriteString(helpStyle.Render("Press 'y' to delete, 'n' or Esc to cancel"))
 	}
 
 	return menuStyle.Render(b.String())

@@ -340,3 +340,72 @@ func (c *Client) SendMessage(token string, roomID uint, content string) (*Messag
 	}
 	return &response.Data, nil
 }
+
+// UpdateMessage updates an existing message using a bearer token.
+func (c *Client) UpdateMessage(token string, messageID uint, content string) (*Message, error) {
+	reqBody := map[string]any{
+		"content": content,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/api/v1/messages/%d", c.BaseURL, messageID)
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Message string  `json:"message"`
+		Data    Message `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// DeleteMessage deletes a message using a bearer token.
+func (c *Client) DeleteMessage(token string, messageID uint) error {
+	url := fmt.Sprintf("%s/api/v1/messages/%d", c.BaseURL, messageID)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return fmt.Errorf("api error: %s", resp.Status)
+		}
+		return errors.New(apiErr.Error)
+	}
+
+	return nil
+}

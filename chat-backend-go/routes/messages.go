@@ -17,4 +17,6 @@ func MessageRoutes(app *fiber.App) {
 	protected := api.Use(middleware.AuthRequired(), middleware.TrackActivity())
 	protected.Post("/messages", handlers.SendMessage)
 	protected.Get("/rooms/:roomId/messages", handlers.GetMessages)
+	protected.Put("/messages/:id", handlers.UpdateMessage)
+	protected.Delete("/messages/:id", handlers.DeleteMessage)
 }

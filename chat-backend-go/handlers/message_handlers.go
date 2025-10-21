@@ -131,3 +131,115 @@ func GetRooms(c *fiber.Ctx) error {
 		"rooms": rooms,
 	})
 }
+
+// UpdateMessage updates an existing message
+func UpdateMessage(c *fiber.Ctx) error {
+	// Get user ID from JWT middleware
+	userID := c.Locals("userID")
+	if userID == nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	// Get message ID from URL params
+	messageIDStr := c.Params("id")
+	messageID, err := strconv.ParseUint(messageIDStr, 10, 32)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid message ID",
+		})
+	}
+
+	type UpdateRequest struct {
+		Content string `json:"content" validate:"required"`
+	}
+
+	var req UpdateRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	// Fetch the message
+	var message models.Message
+	if err := config.DB.First(&message, messageID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Message not found",
+		})
+	}
+
+	// Check if user owns the message
+	if message.UserID != userID.(uint) {
+		return c.Status(403).JSON(fiber.Map{
+			"error": "You can only edit your own messages",
+		})
+	}
+
+	// Update the message content
+	message.Content = req.Content
+	if err := config.DB.Save(&message).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to update message",
+		})
+	}
+
+	// Reload with user data for response
+	if err := config.DB.Preload("User").First(&message, message.ID).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to load message data",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Message updated successfully",
+		"data":    message,
+	})
+}
+
+// DeleteMessage soft deletes a message
+func DeleteMessage(c *fiber.Ctx) error {
+	// Get user ID from JWT middleware
+	userID := c.Locals("userID")
+	if userID == nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	// Get message ID from URL params
+	messageIDStr := c.Params("id")
+	messageID, err := strconv.ParseUint(messageIDStr, 10, 32)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid message ID",
+		})
+	}
+
+	// Fetch the message
+	var message models.Message
+	if err := config.DB.First(&message, messageID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Message not found",
+		})
+	}
+
+	// Check if user owns the message
+	if message.UserID != userID.(uint) {
+		return c.Status(403).JSON(fiber.Map{
+			"error": "You can only delete your own messages",
+		})
+	}
+
+	// Soft delete the message
+	if err := config.DB.Delete(&message).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to delete message",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Message deleted successfully",
+	})
+}
