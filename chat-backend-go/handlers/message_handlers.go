@@ -19,8 +19,9 @@ func SendMessage(c *fiber.Ctx) error {
 	}
 
 	type MessageRequest struct {
-		RoomID  uint   `json:"room_id" validate:"required"`
-		Content string `json:"content" validate:"required"`
+		RoomID   uint   `json:"room_id" validate:"required"`
+		Content  string `json:"content" validate:"required"`
+		ParentID *uint  `json:"parent_id,omitempty"`
 	}
 
 	var req MessageRequest
@@ -38,11 +39,28 @@ func SendMessage(c *fiber.Ctx) error {
 		})
 	}
 
+	// Validate parent message exists if ParentID is provided
+	if req.ParentID != nil {
+		var parentMsg models.Message
+		if err := config.DB.First(&parentMsg, *req.ParentID).Error; err != nil {
+			return c.Status(404).JSON(fiber.Map{
+				"error": "Parent message not found",
+			})
+		}
+		// Ensure parent message is in the same room
+		if parentMsg.RoomID != req.RoomID {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Parent message must be in the same room",
+			})
+		}
+	}
+
 	// Create message
 	message := models.Message{
-		UserID:  userID.(uint),
-		RoomID:  req.RoomID,
-		Content: req.Content,
+		UserID:   userID.(uint),
+		RoomID:   req.RoomID,
+		Content:  req.Content,
+		ParentID: req.ParentID,
 	}
 
 	if err := config.DB.Create(&message).Error; err != nil {
@@ -51,12 +69,15 @@ func SendMessage(c *fiber.Ctx) error {
 		})
 	}
 
-	// Load user data for response
-	if err := config.DB.Preload("User").First(&message, message.ID).Error; err != nil {
+	// Load user data and parent message for response
+	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to load message data",
 		})
 	}
+
+	// Broadcast message to WebSocket clients in the room
+	BroadcastMessage(message.RoomID, "message", message, message.UserID)
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Message sent successfully",
@@ -93,6 +114,7 @@ func GetMessages(c *fiber.Ctx) error {
 	var messages []models.Message
 	if err := config.DB.
 		Preload("User").
+		Preload("ParentMessage.User").
 		Where("room_id = ?", roomID).
 		Order("created_at DESC").
 		Limit(limit).
@@ -185,8 +207,8 @@ func UpdateMessage(c *fiber.Ctx) error {
 		})
 	}
 
-	// Reload with user data for response
-	if err := config.DB.Preload("User").First(&message, message.ID).Error; err != nil {
+	// Reload with user data and parent message for response
+	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to load message data",
 		})

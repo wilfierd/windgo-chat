@@ -64,13 +64,15 @@ type Room struct {
 
 // Message represents a chat message from the API.
 type Message struct {
-	ID        uint      `json:"id"`
-	UserID    uint      `json:"user_id"`
-	RoomID    uint      `json:"room_id"`
-	Content   string    `json:"content"`
-	User      User      `json:"user"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID            uint      `json:"id"`
+	UserID        uint      `json:"user_id"`
+	RoomID        uint      `json:"room_id"`
+	Content       string    `json:"content"`
+	User          User      `json:"user"`
+	ParentID      *uint     `json:"parent_id,omitempty"`
+	ParentMessage *Message  `json:"parent_message,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // DeviceStartResponse is returned when initiating a GitHub device flow.
@@ -299,10 +301,14 @@ func (c *Client) GetMessages(token string, roomID uint, page, limit int) ([]Mess
 }
 
 // SendMessage sends a new message to a room using a bearer token.
-func (c *Client) SendMessage(token string, roomID uint, content string) (*Message, error) {
+func (c *Client) SendMessage(token string, roomID uint, content string, parentID *uint) (*Message, error) {
 	reqBody := map[string]any{
 		"room_id": roomID,
 		"content": content,
+	}
+
+	if parentID != nil {
+		reqBody["parent_id"] = *parentID
 	}
 
 	body, err := json.Marshal(reqBody)

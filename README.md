@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Docker-Optional-2496ED?logo=docker">
 </p>
 
-A modern real-time chat application featuring authentication, user profiles, and chat rooms.  
+A modern real-time chat application featuring authentication, user profiles, and chat rooms.
 Built with Go for the backend. The web frontend has moved to a separate repository, and this repo is moving toward a CLI-based chat client.
 
 > Notice: Frontend moved to its own repo
@@ -40,7 +40,7 @@ The backend will start on `http://localhost:8080`.
 
 #### Database Initialization
 
-- The backend uses a SQL database.  
+- The backend uses a SQL database.
 - To initialize, run the SQL script:
   ```bash
   psql -U <username> -d <database> -f init.sql
@@ -52,22 +52,4 @@ The backend will start on `http://localhost:8080`.
 To run backend and database with Docker:
 ```bash
 docker-compose up
-```
-
----
-
-### Frontend (Moved)
-
-The web frontend has moved to a separate repository: https://github.com/wilfierd/wildgo-Fe
-
-- Use that repository if you prefer a browser UI. Follow its README for setup and commands.
-- This repository will evolve toward a CLI chat client; the web UI remains available via `wildgo-Fe`.
-
-### CLI (Preview)
-
-An experimental terminal client now lives in `cli/`:
-
-```bash
-cd cli
-go run ./cmd/windgo
 ```

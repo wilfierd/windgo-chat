@@ -153,6 +153,15 @@ type Model struct {
 	selectedMessageIndex int             // Currently selected message for edit/delete
 	editingMessage       *api.Message    // Message being edited
 	editInput            textinput.Model // Text input for editing message
+	replyingTo           *api.Message    // Message being replied to
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // openBrowser opens the specified URL in the user's default browser
@@ -416,9 +425,9 @@ func loadMoreMessagesCmd(client *api.Client, token string, roomID uint, page int
 	}
 }
 
-func sendMessageCmd(client *api.Client, token string, roomID uint, content string) tea.Cmd {
+func sendMessageCmd(client *api.Client, token string, roomID uint, content string, parentID *uint) tea.Cmd {
 	return func() tea.Msg {
-		message, err := client.SendMessage(token, roomID, content)
+		message, err := client.SendMessage(token, roomID, content, parentID)
 		if err != nil {
 			return messageSentMsg{err: err}
 		}
@@ -1222,7 +1231,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case stateConversation:
 		switch msg.String() {
 		case "esc":
-			// Exit conversation and leave room via WebSocket
+			// If replying to a message, cancel reply mode
+			if m.replyingTo != nil {
+				m.replyingTo = nil
+				m.messageInput.Placeholder = "Type a message... (ESC to go back)"
+				m.status = ""
+				return m, nil
+			}
+			// If a message is selected, deselect it
+			if m.selectedMessageIndex >= 0 {
+				m.selectedMessageIndex = -1
+				m.status = ""
+				m.updateMessageViewport()
+				return m, nil
+			}
+			// Otherwise, exit conversation and leave room via WebSocket
 			var cmd tea.Cmd
 			if m.currentRoom != nil && m.wsClient != nil {
 				cmd = leaveRoomCmd(m.wsClient, m.currentRoom.ID)
@@ -1233,8 +1256,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.messages = nil
 			m.status = ""
 			m.messageInput.SetValue("")
+			m.messageInput.Placeholder = "Type a message... (ESC to go back)"
 			m.messageInput.Blur()
 			m.selectedMessageIndex = -1
+			m.replyingTo = nil
 			return m, cmd
 		case "enter":
 			// Send message
@@ -1244,7 +1269,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				if strings.HasPrefix(content, "/") {
 					m.handleCommand(content)
 				} else {
-					return m, sendMessageCmd(m.client, m.token, m.currentRoom.ID, content)
+					// Include parent ID if replying to a message
+					var parentID *uint
+					if m.replyingTo != nil {
+						parentID = &m.replyingTo.ID
+					}
+					cmd := sendMessageCmd(m.client, m.token, m.currentRoom.ID, content, parentID)
+					// Clear reply context after sending
+					m.replyingTo = nil
+					m.messageInput.Placeholder = "Type a message... (ESC to go back)"
+					return m, cmd
 				}
 			}
 		case "up", "k":
@@ -1252,7 +1286,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.selectedMessageIndex == -1 && len(m.messages) > 0 {
 				m.selectedMessageIndex = 0
 				m.messageInput.Blur() // Blur input when selecting messages
-				m.status = helpStyle.Render("Press 'e' to edit, 'd' to delete, or arrow keys to navigate messages")
+				m.replyingTo = nil    // Clear reply context when navigating
+				m.messageInput.Placeholder = "Type a message... (ESC to go back)"
+				m.status = helpStyle.Render("Press 'r' to reply, 'e' to edit, 'd' to delete, or arrow keys to navigate")
 				m.updateMessageViewport() // Refresh viewport to show selection
 			} else if m.selectedMessageIndex < len(m.messages)-1 {
 				// Move UP on screen = older message = higher index
@@ -1276,12 +1312,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			} else if m.selectedMessageIndex == 0 {
 				// At newest message, deselect and scroll viewport
 				m.selectedMessageIndex = -1
+				m.replyingTo = nil // Clear reply context
+				m.messageInput.Placeholder = "Type a message... (ESC to go back)"
 				m.messageInput.Focus() // Refocus input when deselecting
 				m.status = ""
 				m.updateMessageViewport() // Refresh viewport to clear selection
 				m.messageViewport.LineDown(1)
 			} else {
 				m.messageViewport.LineDown(1)
+			}
+		case "r":
+			// Reply to selected message
+			if m.selectedMessageIndex >= 0 && m.selectedMessageIndex < len(m.messages) {
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				m.replyingTo = &selectedMsg
+				m.selectedMessageIndex = -1
+				m.messageInput.Focus()
+				// Update placeholder to show reply context
+				replyTo := selectedMsg.User.Username
+				if selectedMsg.UserID == m.user.ID {
+					replyTo = "yourself"
+				}
+				m.messageInput.Placeholder = fmt.Sprintf("Replying to %s... (ESC to cancel)", replyTo)
+				m.status = successStyle.Render(fmt.Sprintf("↳ Replying to: %s", selectedMsg.Content[:min(50, len(selectedMsg.Content))]))
 			}
 		case "e":
 			// Edit selected message if it belongs to the user
@@ -1311,6 +1364,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		case "pgup":
 			m.selectedMessageIndex = -1
+			m.replyingTo = nil // Clear reply context
+			m.messageInput.Placeholder = "Type a message... (ESC to go back)"
 			m.messageInput.Focus() // Refocus input when deselecting
 			m.status = ""
 			m.updateMessageViewport() // Refresh viewport to clear selection
@@ -1323,6 +1378,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		case "pgdown":
 			m.selectedMessageIndex = -1
+			m.replyingTo = nil // Clear reply context
+			m.messageInput.Placeholder = "Type a message... (ESC to go back)"
 			m.messageInput.Focus() // Refocus input when deselecting
 			m.status = ""
 			m.updateMessageViewport() // Refresh viewport to clear selection
@@ -1398,23 +1455,46 @@ func (m *Model) updateMessageViewport() {
 
 	var b strings.Builder
 
-	// Reverse messages so newest is at bottom
-	for i := len(m.messages) - 1; i >= 0; i-- {
+	// Build a map of message ID to replies for threading
+	repliesMap := make(map[uint][]int) // parent_id -> []message_indices
+	topLevel := []int{}                // indices of top-level messages (no parent)
+
+	for i := 0; i < len(m.messages); i++ {
 		msg := m.messages[i]
+		if msg.ParentID != nil {
+			repliesMap[*msg.ParentID] = append(repliesMap[*msg.ParentID], i)
+		} else {
+			topLevel = append(topLevel, i)
+		}
+	}
 
-		// Format timestamp
+	// Recursive function to render a message and its replies
+	var renderMessage func(msgIndex int, indent int)
+	renderMessage = func(msgIndex int, indent int) {
+		if msgIndex < 0 || msgIndex >= len(m.messages) {
+			return
+		}
+
+		msg := m.messages[msgIndex]
 		timestamp := msg.CreatedAt.Format("15:04")
-
-		// Build message line
 		username := msg.User.Username
 		if msg.UserID == m.user.ID {
 			username = "You"
 		}
 
-		// Check if this message is selected for edit/delete
-		isSelected := m.selectedMessageIndex == i
+		// Check if this message is selected
+		isSelected := m.selectedMessageIndex == msgIndex
 
-		// Build the message line
+		// Build indentation
+		indentStr := strings.Repeat("  ", indent)
+		var prefix string
+		if indent > 0 {
+			prefix = indentStr + "└─ "
+		} else {
+			prefix = "  "
+		}
+
+		// Build message line
 		var messageLine strings.Builder
 		messageLine.WriteString(helpStyle.Render(timestamp))
 		messageLine.WriteString(" ")
@@ -1424,15 +1504,26 @@ func (m *Model) updateMessageViewport() {
 
 		// Highlight if selected
 		if isSelected {
-			// Add visual indicator for selected message
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("11")). // Bright yellow
 				Bold(true).
-				Render("> " + messageLine.String()))
+				Render("> " + prefix + messageLine.String()))
 		} else {
-			b.WriteString("  " + messageLine.String())
+			b.WriteString(prefix + messageLine.String())
 		}
 		b.WriteString("\n")
+
+		// Render replies recursively (in chronological order)
+		if replies, hasReplies := repliesMap[msg.ID]; hasReplies {
+			for _, replyIdx := range replies {
+				renderMessage(replyIdx, indent+1)
+			}
+		}
+	}
+
+	// Render all top-level messages in reverse order (newest at bottom)
+	for i := len(topLevel) - 1; i >= 0; i-- {
+		renderMessage(topLevel[i], 0)
 	}
 
 	m.messageViewport.SetContent(b.String())
@@ -1703,11 +1794,13 @@ func (m Model) View() string {
 		b.WriteString(m.messageInput.View())
 		b.WriteString("\n\n")
 
-		// Help text with edit/delete options
+		// Help text with edit/delete/reply options
 		if m.selectedMessageIndex >= 0 {
-			b.WriteString(helpStyle.Render("↑/↓: navigate | e: edit | d: delete | Enter: send | Esc: back"))
+			b.WriteString(helpStyle.Render("↑/↓: navigate | r: reply | e: edit | d: delete | Esc: back"))
+		} else if m.replyingTo != nil {
+			b.WriteString(helpStyle.Render("Replying mode | Enter: send reply | Esc: cancel reply"))
 		} else {
-			b.WriteString(helpStyle.Render("Enter: send | ↑/↓: scroll/select | /vault: vault (soon) | /help: commands | Esc: back"))
+			b.WriteString(helpStyle.Render("↑/↓: select msg | Enter: send | Esc: back"))
 		}
 
 	case stateEditingMessage:
