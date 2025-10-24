@@ -31,6 +31,10 @@ const (
 	stateConversation
 	stateEditingMessage
 	stateConfirmDelete
+	stateAdminRooms
+	stateCreateRoom
+	stateEditRoom
+	stateConfirmDeleteRoom
 )
 
 type lobbyView int
@@ -97,6 +101,14 @@ var mainMenuOptions = []string{
 	"Logout",
 }
 
+var adminMenuOptions = []string{
+	"Chat Lobby",
+	"My Profile",
+	"Settings",
+	"Admin: Manage Rooms",
+	"Logout",
+}
+
 // Model holds application state for the login experience.
 type Model struct {
 	client   *api.Client
@@ -154,6 +166,12 @@ type Model struct {
 	editingMessage       *api.Message    // Message being edited
 	editInput            textinput.Model // Text input for editing message
 	replyingTo           *api.Message    // Message being replied to
+
+	// Admin room management
+	adminRoomIndex   int             // Currently selected room in admin view
+	roomNameInput    textinput.Model // Text input for room name (create/edit)
+	selectedRoomID   uint            // Room ID being edited/deleted
+	selectedRoomName string          // Room name being edited/deleted
 }
 
 // min returns the minimum of two integers
@@ -212,6 +230,11 @@ func NewModel(client *api.Client) Model {
 	editInput.CharLimit = 1000
 	editInput.Width = 80
 
+	roomNameInput := textinput.New()
+	roomNameInput.Placeholder = "Room name..."
+	roomNameInput.CharLimit = 50
+	roomNameInput.Width = 40
+
 	return Model{
 		client:               client,
 		state:                stateLoading,
@@ -220,8 +243,10 @@ func NewModel(client *api.Client) Model {
 		searchInput:          search,
 		messageInput:         messageInput,
 		editInput:            editInput,
+		roomNameInput:        roomNameInput,
 		currentView:          lobbyViewRooms,
 		selectedMessageIndex: -1,
+		adminRoomIndex:       -1,
 	}
 }
 
@@ -301,6 +326,20 @@ type messageUpdatedMsg struct {
 type messageDeletedMsg struct {
 	messageID uint
 	err       error
+}
+
+type roomCreatedMsg struct {
+	room *api.Room
+	err  error
+}
+
+type roomUpdatedMsg struct {
+	room *api.Room
+	err  error
+}
+
+type roomDeletedMsg struct {
+	err error
 }
 
 type userPollTickMsg time.Time
@@ -452,6 +491,36 @@ func deleteMessageCmd(client *api.Client, token string, messageID uint) tea.Cmd 
 			return messageDeletedMsg{err: err}
 		}
 		return messageDeletedMsg{messageID: messageID}
+	}
+}
+
+func createRoomCmd(client *api.Client, token string, name string) tea.Cmd {
+	return func() tea.Msg {
+		room, err := client.CreateRoom(token, name)
+		if err != nil {
+			return roomCreatedMsg{err: err}
+		}
+		return roomCreatedMsg{room: room}
+	}
+}
+
+func updateRoomCmd(client *api.Client, token string, roomID uint, name string) tea.Cmd {
+	return func() tea.Msg {
+		room, err := client.UpdateRoom(token, roomID, name)
+		if err != nil {
+			return roomUpdatedMsg{err: err}
+		}
+		return roomUpdatedMsg{room: room}
+	}
+}
+
+func deleteRoomCmd(client *api.Client, token string, roomID uint) tea.Cmd {
+	return func() tea.Msg {
+		err := client.DeleteRoom(token, roomID)
+		if err != nil {
+			return roomDeletedMsg{err: err}
+		}
+		return roomDeletedMsg{}
 	}
 }
 
@@ -893,6 +962,38 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.messageInput.Focus() // Refocus input after successful delete
 		return m, nil
 
+	case roomCreatedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to create room: %v", msg.err))
+			m.state = stateCreateRoom
+			return m, nil
+		}
+		m.status = successStyle.Render(fmt.Sprintf("Room '%s' created successfully!", msg.room.Name))
+		m.state = stateAdminRooms
+		m.roomNameInput.SetValue("")
+		return m, loadRoomsCmd(m.client, m.token)
+
+	case roomUpdatedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to update room: %v", msg.err))
+			m.state = stateEditRoom
+			return m, nil
+		}
+		m.status = successStyle.Render(fmt.Sprintf("Room '%s' updated successfully!", msg.room.Name))
+		m.state = stateAdminRooms
+		m.roomNameInput.SetValue("")
+		return m, loadRoomsCmd(m.client, m.token)
+
+	case roomDeletedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to delete room: %v", msg.err))
+			m.state = stateConfirmDeleteRoom
+			return m, nil
+		}
+		m.status = successStyle.Render("Room deleted successfully!")
+		m.state = stateAdminRooms
+		return m, loadRoomsCmd(m.client, m.token)
+
 	case tea.WindowSizeMsg:
 		if !m.viewportReady {
 			m.viewport = viewport.New(msg.Width, msg.Height-10)
@@ -972,6 +1073,21 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if !skipEditInput {
 				var cmd tea.Cmd
 				m.editInput, cmd = m.editInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		// Handle room name input in create/edit room states
+		if m.state == stateCreateRoom || m.state == stateEditRoom {
+			skipRoomInput := false
+			switch keyMsg.String() {
+			case "esc", "enter":
+				skipRoomInput = true
+			}
+			if !skipRoomInput {
+				var cmd tea.Cmd
+				m.roomNameInput, cmd = m.roomNameInput.Update(message)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -1107,44 +1223,89 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case stateMainMenu:
+		// Determine which menu options to use based on user role
+		menuOpts := mainMenuOptions
+		if m.user != nil && m.user.Role == "admin" {
+			menuOpts = adminMenuOptions
+		}
+
 		switch msg.String() {
 		case "up", "k":
 			if m.menuIndex > 0 {
 				m.menuIndex--
 			}
 		case "down", "j":
-			if m.menuIndex < len(mainMenuOptions)-1 {
+			if m.menuIndex < len(menuOpts)-1 {
 				m.menuIndex++
 			}
 		case "enter":
-			switch m.menuIndex {
-			case 0: // Chat Lobby
-				m.status = "Loading chat rooms..."
-				m.state = stateChatLobby
-				return m, tea.Batch(
-					loadRoomsCmd(m.client, m.token),
-					loadUsersCmd(m.client, m.token),
-				)
-			case 1: // My Profile
-				m.status = "Profile view coming soon..."
-			case 2: // Settings
-				m.status = "Settings coming soon..."
-			case 3: // Logout
-				m.token = ""
-				m.user = nil
-				m.rooms = nil
-				m.users = nil
-				m.state = stateLoginMenu
-				m.menuIndex = 0
-				m.status = "Logged out successfully. Choose how you want to sign in."
-				// Stop polling, disconnect WebSocket, and clear stored credentials
-				m.userPollingActive = false
-				if m.wsClient != nil {
-					m.wsClient.Disconnect()
-					m.wsClient = nil
+			// Handle admin menu differently
+			if m.user != nil && m.user.Role == "admin" {
+				switch m.menuIndex {
+				case 0: // Chat Lobby
+					m.status = "Loading chat rooms..."
+					m.state = stateChatLobby
+					return m, tea.Batch(
+						loadRoomsCmd(m.client, m.token),
+						loadUsersCmd(m.client, m.token),
+					)
+				case 1: // My Profile
+					m.status = "Profile view coming soon..."
+				case 2: // Settings
+					m.status = "Settings coming soon..."
+				case 3: // Admin: Manage Rooms
+					m.status = "Loading rooms for management..."
+					m.state = stateAdminRooms
+					m.adminRoomIndex = 0
+					return m, loadRoomsCmd(m.client, m.token)
+				case 4: // Logout
+					m.token = ""
+					m.user = nil
+					m.rooms = nil
+					m.users = nil
+					m.state = stateLoginMenu
+					m.menuIndex = 0
+					m.status = "Logged out successfully. Choose how you want to sign in."
+					// Stop polling, disconnect WebSocket, and clear stored credentials
+					m.userPollingActive = false
+					if m.wsClient != nil {
+						m.wsClient.Disconnect()
+						m.wsClient = nil
+					}
+					_ = storage.Save(storage.Credentials{})
+					return m, nil
 				}
-				_ = storage.Save(storage.Credentials{})
-				return m, nil
+			} else {
+				// Regular user menu
+				switch m.menuIndex {
+				case 0: // Chat Lobby
+					m.status = "Loading chat rooms..."
+					m.state = stateChatLobby
+					return m, tea.Batch(
+						loadRoomsCmd(m.client, m.token),
+						loadUsersCmd(m.client, m.token),
+					)
+				case 1: // My Profile
+					m.status = "Profile view coming soon..."
+				case 2: // Settings
+					m.status = "Settings coming soon..."
+				case 3: // Logout
+					m.token = ""
+					m.user = nil
+					m.rooms = nil
+					m.users = nil
+					m.state = stateLoginMenu
+					m.menuIndex = 0
+					m.status = "Logged out successfully. Choose how you want to sign in."
+					// Stop polling, disconnect WebSocket, and clear stored credentials
+					m.userPollingActive = false
+					if m.wsClient != nil {
+						m.wsClient.Disconnect()
+						m.wsClient = nil
+					}
+					_ = storage.Save(storage.Credentials{})
+					return m, nil
+				}
 			}
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -1413,6 +1574,92 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.messageInput.Focus() // Refocus message input when canceling delete
 			m.status = ""
 		}
+
+	case stateAdminRooms:
+		switch msg.String() {
+		case "up", "k":
+			if m.adminRoomIndex > 0 {
+				m.adminRoomIndex--
+			}
+		case "down", "j":
+			if m.adminRoomIndex < len(m.rooms)-1 {
+				m.adminRoomIndex++
+			}
+		case "c":
+			// Create new room
+			m.state = stateCreateRoom
+			m.roomNameInput.SetValue("")
+			m.roomNameInput.Focus()
+			m.status = "Enter a name for the new room"
+		case "e":
+			// Edit selected room
+			if len(m.rooms) > 0 && m.adminRoomIndex < len(m.rooms) {
+				selectedRoom := m.rooms[m.adminRoomIndex]
+				m.selectedRoomID = selectedRoom.ID
+				m.selectedRoomName = selectedRoom.Name
+				m.roomNameInput.SetValue(selectedRoom.Name)
+				m.roomNameInput.Focus()
+				m.state = stateEditRoom
+				m.status = fmt.Sprintf("Editing room: %s", selectedRoom.Name)
+			}
+		case "d":
+			// Delete selected room
+			if len(m.rooms) > 0 && m.adminRoomIndex < len(m.rooms) {
+				selectedRoom := m.rooms[m.adminRoomIndex]
+				m.selectedRoomID = selectedRoom.ID
+				m.selectedRoomName = selectedRoom.Name
+				m.state = stateConfirmDeleteRoom
+				m.status = fmt.Sprintf("Delete room '%s'? (y/n)", selectedRoom.Name)
+			}
+		case "esc":
+			m.state = stateMainMenu
+			m.status = ""
+			m.adminRoomIndex = 0
+		}
+
+	case stateCreateRoom:
+		switch msg.String() {
+		case "enter":
+			roomName := strings.TrimSpace(m.roomNameInput.Value())
+			if roomName == "" {
+				m.status = errorStyle.Render("Room name cannot be empty")
+				return m, nil
+			}
+			m.status = "Creating room..."
+			return m, createRoomCmd(m.client, m.token, roomName)
+		case "esc":
+			m.state = stateAdminRooms
+			m.roomNameInput.SetValue("")
+			m.roomNameInput.Blur()
+			m.status = ""
+		}
+
+	case stateEditRoom:
+		switch msg.String() {
+		case "enter":
+			roomName := strings.TrimSpace(m.roomNameInput.Value())
+			if roomName == "" {
+				m.status = errorStyle.Render("Room name cannot be empty")
+				return m, nil
+			}
+			m.status = "Updating room..."
+			return m, updateRoomCmd(m.client, m.token, m.selectedRoomID, roomName)
+		case "esc":
+			m.state = stateAdminRooms
+			m.roomNameInput.SetValue("")
+			m.roomNameInput.Blur()
+			m.status = ""
+		}
+
+	case stateConfirmDeleteRoom:
+		switch msg.String() {
+		case "y", "Y":
+			m.status = "Deleting room..."
+			return m, deleteRoomCmd(m.client, m.token, m.selectedRoomID)
+		case "n", "N", "esc":
+			m.state = stateAdminRooms
+			m.status = ""
+		}
 	}
 
 	return m, nil
@@ -1591,10 +1838,19 @@ func (m Model) View() string {
 	case stateMainMenu:
 		b.WriteString(titleStyle.Render("WindGo Chat"))
 		b.WriteString("\n\n")
-		b.WriteString(statusStyle.Render(fmt.Sprintf("Logged in as %s\n", m.user.Username)))
-		b.WriteString("\n")
+		b.WriteString(statusStyle.Render(fmt.Sprintf("Logged in as %s", m.user.Username)))
+		if m.user != nil && m.user.Role == "admin" {
+			b.WriteString(statusStyle.Render(" (Admin)"))
+		}
+		b.WriteString("\n\n")
 
-		for i, opt := range mainMenuOptions {
+		// Use appropriate menu based on role
+		menuOpts := mainMenuOptions
+		if m.user != nil && m.user.Role == "admin" {
+			menuOpts = adminMenuOptions
+		}
+
+		for i, opt := range menuOpts {
 			if i == m.menuIndex {
 				b.WriteString(selectedItem.Render("> " + opt))
 			} else {
@@ -1846,6 +2102,81 @@ func (m Model) View() string {
 		}
 
 		// Confirmation prompt
+		b.WriteString(helpStyle.Render("Press 'y' to delete, 'n' or Esc to cancel"))
+
+	case stateAdminRooms:
+		b.WriteString(titleStyle.Render("Admin: Manage Rooms"))
+		b.WriteString(" ")
+		b.WriteString(statusStyle.Render("- " + m.user.Username))
+		b.WriteString("\n\n")
+
+		if len(m.rooms) == 0 {
+			b.WriteString(statusStyle.Render("No rooms available."))
+			b.WriteString("\n\n")
+		} else {
+			b.WriteString(fmt.Sprintf("Total rooms: %d\n\n", len(m.rooms)))
+			// Show max 15 items for scrolling
+			startIdx := 0
+			endIdx := len(m.rooms)
+			if endIdx > 15 {
+				if m.adminRoomIndex > 7 {
+					startIdx = m.adminRoomIndex - 7
+				}
+				endIdx = startIdx + 15
+				if endIdx > len(m.rooms) {
+					endIdx = len(m.rooms)
+					startIdx = endIdx - 15
+					if startIdx < 0 {
+						startIdx = 0
+					}
+				}
+			}
+			if startIdx > 0 {
+				b.WriteString("  ↑ More items above\n")
+			}
+			for i := startIdx; i < endIdx; i++ {
+				room := m.rooms[i]
+				if i == m.adminRoomIndex {
+					b.WriteString(selectedItem.Render(fmt.Sprintf("> %s (ID: %d)", room.Name, room.ID)))
+				} else {
+					b.WriteString(normalItem.Render(fmt.Sprintf("  %s (ID: %d)", room.Name, room.ID)))
+				}
+				b.WriteString("\n")
+			}
+			if endIdx < len(m.rooms) {
+				b.WriteString("  ↓ More items below\n")
+			}
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("↑/↓: navigate | c: create | e: edit | d: delete | Esc: back"))
+
+	case stateCreateRoom:
+		b.WriteString(titleStyle.Render("Admin: Create New Room"))
+		b.WriteString("\n\n")
+		b.WriteString("Enter room name:\n")
+		b.WriteString(m.roomNameInput.View())
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render("Enter: create room | Esc: cancel"))
+
+	case stateEditRoom:
+		b.WriteString(titleStyle.Render("Admin: Edit Room"))
+		b.WriteString("\n\n")
+		b.WriteString(statusStyle.Render(fmt.Sprintf("Editing: %s (ID: %d)", m.selectedRoomName, m.selectedRoomID)))
+		b.WriteString("\n\n")
+		b.WriteString("New room name:\n")
+		b.WriteString(m.roomNameInput.View())
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render("Enter: save changes | Esc: cancel"))
+
+	case stateConfirmDeleteRoom:
+		b.WriteString(titleStyle.Render("Admin: Delete Room"))
+		b.WriteString("\n\n")
+		b.WriteString(errorStyle.Render("⚠ Are you sure you want to delete this room?"))
+		b.WriteString("\n\n")
+		b.WriteString(statusStyle.Render(fmt.Sprintf("Room: %s (ID: %d)", m.selectedRoomName, m.selectedRoomID)))
+		b.WriteString("\n")
+		b.WriteString(normalItem.Render("⚠ This will soft-delete the room. All messages will be preserved but the room will be hidden."))
+		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("Press 'y' to delete, 'n' or Esc to cancel"))
 	}
 

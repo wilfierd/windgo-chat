@@ -222,6 +222,115 @@ func (c *Client) GetRooms(token string) ([]Room, error) {
 	return response.Rooms, nil
 }
 
+// CreateRoom creates a new chat room (admin only)
+func (c *Client) CreateRoom(token, name string) (*Room, error) {
+	payload := map[string]string{
+		"name": name,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/api/v1/rooms", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Message string `json:"message"`
+		Room    Room   `json:"room"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return &response.Room, nil
+}
+
+// UpdateRoom updates an existing chat room (admin only)
+func (c *Client) UpdateRoom(token string, roomID uint, name string) (*Room, error) {
+	payload := map[string]string{
+		"name": name,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/api/v1/rooms/%d", c.BaseURL, roomID)
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return nil, fmt.Errorf("api error: %s", resp.Status)
+		}
+		return nil, errors.New(apiErr.Error)
+	}
+
+	var response struct {
+		Message string `json:"message"`
+		Room    Room   `json:"room"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return &response.Room, nil
+}
+
+// DeleteRoom deletes a chat room (admin only)
+func (c *Client) DeleteRoom(token string, roomID uint) error {
+	url := fmt.Sprintf("%s/api/v1/rooms/%d", c.BaseURL, roomID)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+			return fmt.Errorf("api error: %s", resp.Status)
+		}
+		return errors.New(apiErr.Error)
+	}
+
+	return nil
+}
+
 // GetUsers fetches the list of available users using a bearer token.
 // Optionally filters by search query.
 func (c *Client) GetUsers(token, search string) ([]User, error) {
