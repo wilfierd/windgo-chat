@@ -1051,9 +1051,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle message input in conversation
 		if m.state == stateConversation {
 			skipMessageInput := false
-			switch keyMsg.String() {
-			case "esc", "enter", "up", "k", "down", "j", "pgup", "pgdown", "e", "d":
-				skipMessageInput = true
+			// Only skip command keys when input is not focused (i.e., when navigating messages)
+			// When input is focused (typing/replying), allow all keys through except tab
+			if !m.messageInput.Focused() {
+				switch keyMsg.String() {
+				case "tab", "esc", "enter", "up", "k", "down", "j", "pgup", "pgdown", "r", "e", "d":
+					skipMessageInput = true
+				}
+			} else {
+				// When focused, only skip tab (to toggle mode)
+				switch keyMsg.String() {
+				case "tab":
+					skipMessageInput = true
+				}
 			}
 			if !skipMessageInput {
 				var cmd tea.Cmd
@@ -1391,6 +1401,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case stateConversation:
 		switch msg.String() {
+		case "tab":
+			// Toggle between typing mode and navigation mode
+			if m.messageInput.Focused() {
+				// Switch to navigation mode: blur input, select newest message
+				m.messageInput.Blur()
+				if len(m.messages) > 0 {
+					m.selectedMessageIndex = 0
+					m.status = helpStyle.Render("Navigation mode: use ↑/↓ to navigate messages")
+				}
+				m.updateMessageViewport()
+			} else {
+				// Switch to typing mode: focus input, deselect message
+				m.selectedMessageIndex = -1
+				m.messageInput.Focus()
+				m.status = ""
+				m.updateMessageViewport()
+			}
 		case "esc":
 			// If replying to a message, cancel reply mode
 			if m.replyingTo != nil {
@@ -1443,17 +1470,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 			}
 		case "up", "k":
+			// Navigation only works when input is not focused (use Tab to switch modes)
+			if m.messageInput.Focused() {
+				return m, nil
+			}
 			// If no message is selected, select the newest message (bottom of screen)
 			if m.selectedMessageIndex == -1 && len(m.messages) > 0 {
 				m.selectedMessageIndex = 0
 				m.messageInput.Blur() // Blur input when selecting messages
 				m.replyingTo = nil    // Clear reply context when navigating
 				m.messageInput.Placeholder = "Type a message... (ESC to go back)"
-				m.status = helpStyle.Render("Press 'r' to reply, 'e' to edit, 'd' to delete, or arrow keys to navigate")
+				// Show different help based on message ownership
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.status = helpStyle.Render("Press 'r' to reply, 'e' to edit, 'd' to delete, or arrow keys to navigate")
+				} else {
+					m.status = helpStyle.Render("Press 'r' to reply or arrow keys to navigate")
+				}
 				m.updateMessageViewport() // Refresh viewport to show selection
 			} else if m.selectedMessageIndex < len(m.messages)-1 {
 				// Move UP on screen = older message = higher index
 				m.selectedMessageIndex++
+				// Update status based on newly selected message
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.status = helpStyle.Render("Press 'r' to reply, 'e' to edit, 'd' to delete, or arrow keys to navigate")
+				} else {
+					m.status = helpStyle.Render("Press 'r' to reply or arrow keys to navigate")
+				}
 				m.updateMessageViewport() // Refresh viewport to show selection
 			} else {
 				// Already at oldest message, scroll viewport
@@ -1466,20 +1510,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 			}
 		case "down", "j":
+			// Navigation only works when input is not focused (use Tab to switch modes)
+			if m.messageInput.Focused() {
+				return m, nil
+			}
 			if m.selectedMessageIndex > 0 {
 				// Move DOWN on screen = newer message = lower index
 				m.selectedMessageIndex--
+				// Update status based on newly selected message
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.status = helpStyle.Render("Press 'r' to reply, 'e' to edit, 'd' to delete, or arrow keys to navigate")
+				} else {
+					m.status = helpStyle.Render("Press 'r' to reply or arrow keys to navigate")
+				}
 				m.updateMessageViewport() // Refresh viewport to show selection
-			} else if m.selectedMessageIndex == 0 {
-				// At newest message, deselect and scroll viewport
-				m.selectedMessageIndex = -1
-				m.replyingTo = nil // Clear reply context
-				m.messageInput.Placeholder = "Type a message... (ESC to go back)"
-				m.messageInput.Focus() // Refocus input when deselecting
-				m.status = ""
-				m.updateMessageViewport() // Refresh viewport to clear selection
-				m.messageViewport.LineDown(1)
 			} else {
+				// At newest message or no selection, just scroll viewport
 				m.messageViewport.LineDown(1)
 			}
 		case "r":
@@ -2052,11 +2099,19 @@ func (m Model) View() string {
 
 		// Help text with edit/delete/reply options
 		if m.selectedMessageIndex >= 0 {
-			b.WriteString(helpStyle.Render("↑/↓: navigate | r: reply | e: edit | d: delete | Esc: back"))
+			// Check if selected message belongs to the user
+			selectedMsg := m.messages[m.selectedMessageIndex]
+			if selectedMsg.UserID == m.user.ID {
+				b.WriteString(helpStyle.Render("↑/↓: navigate | r: reply | e: edit | d: delete | Tab: type | Esc: back"))
+			} else {
+				b.WriteString(helpStyle.Render("↑/↓: navigate | r: reply | Tab: type | Esc: back"))
+			}
 		} else if m.replyingTo != nil {
-			b.WriteString(helpStyle.Render("Replying mode | Enter: send reply | Esc: cancel reply"))
+			b.WriteString(helpStyle.Render("Replying mode | Enter: send reply | Esc: cancel reply | Tab: navigate"))
+		} else if m.messageInput.Focused() {
+			b.WriteString(helpStyle.Render("Enter: send | Esc: back"))
 		} else {
-			b.WriteString(helpStyle.Render("↑/↓: select msg | Enter: send | Esc: back"))
+			b.WriteString(helpStyle.Render("Tab: type message | ↑/↓: navigate | Esc: back"))
 		}
 
 	case stateEditingMessage:
