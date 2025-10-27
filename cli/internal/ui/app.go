@@ -29,6 +29,7 @@ const (
 	stateMainMenu
 	stateChatLobby
 	stateConversation
+	stateThreadView
 	stateEditingMessage
 	stateConfirmDelete
 	stateAdminRooms
@@ -167,6 +168,12 @@ type Model struct {
 	editInput            textinput.Model // Text input for editing message
 	replyingTo           *api.Message    // Message being replied to
 
+	// Thread view state
+	threadParentMessage *api.Message    // Parent message of the thread being viewed
+	threadMessages      []api.Message   // Messages in the current thread
+	threadMessageIndex  int             // Selected message index in thread view
+	threadInput         textinput.Model // Text input for thread replies
+
 	// Admin room management
 	adminRoomIndex   int             // Currently selected room in admin view
 	roomNameInput    textinput.Model // Text input for room name (create/edit)
@@ -235,6 +242,11 @@ func NewModel(client *api.Client) Model {
 	roomNameInput.CharLimit = 50
 	roomNameInput.Width = 40
 
+	threadInput := textinput.New()
+	threadInput.Placeholder = "Reply to thread... (ESC to go back)"
+	threadInput.CharLimit = 1000
+	threadInput.Width = 80
+
 	return Model{
 		client:               client,
 		state:                stateLoading,
@@ -244,8 +256,10 @@ func NewModel(client *api.Client) Model {
 		messageInput:         messageInput,
 		editInput:            editInput,
 		roomNameInput:        roomNameInput,
+		threadInput:          threadInput,
 		currentView:          lobbyViewRooms,
 		selectedMessageIndex: -1,
+		threadMessageIndex:   -1,
 		adminRoomIndex:       -1,
 	}
 }
@@ -780,8 +794,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = errorStyle.Render(fmt.Sprintf("Failed to send message: %v", msg.err))
 			return m, nil
 		}
-		// Clear input on success
-		m.messageInput.SetValue("")
+		// Clear appropriate input on success
+		if m.state == stateThreadView {
+			m.threadInput.SetValue("")
+		} else {
+			m.messageInput.SetValue("")
+		}
 		m.status = ""
 		// Add the new message to the list if not already there
 		found := false
@@ -795,6 +813,21 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append([]api.Message{*msg.message}, m.messages...)
 			m.lastMessageID = msg.message.ID
 			m.updateMessageViewport()
+		}
+		// If in thread view and this is a reply to the current thread
+		if m.state == stateThreadView && m.threadParentMessage != nil {
+			if msg.message.ParentID != nil && *msg.message.ParentID == m.threadParentMessage.ID {
+				threadFound := false
+				for _, existing := range m.threadMessages {
+					if existing.ID == msg.message.ID {
+						threadFound = true
+						break
+					}
+				}
+				if !threadFound {
+					m.threadMessages = append(m.threadMessages, *msg.message)
+				}
+			}
 		}
 		return m, nil
 
@@ -864,12 +897,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				if content, ok := contentMap["content"].(string); ok {
 					apiMsg.Content = content
 				}
+				if parentID, ok := contentMap["parent_id"].(float64); ok && parentID > 0 {
+					pid := uint(parentID)
+					apiMsg.ParentID = &pid
+				}
 				if user, ok := contentMap["user"].(map[string]interface{}); ok {
 					if username, ok := user["username"].(string); ok {
 						apiMsg.User.Username = username
 					}
 					if userID, ok := user["id"].(float64); ok {
 						apiMsg.User.ID = uint(userID)
+					}
+				}
+				if createdAt, ok := contentMap["created_at"].(string); ok {
+					parsedTime, err := time.Parse(time.RFC3339, createdAt)
+					if err == nil {
+						apiMsg.CreatedAt = parsedTime
 					}
 				}
 
@@ -887,6 +930,23 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if !isDuplicate {
 						m.messages = append(m.messages, apiMsg)
 						m.updateMessageViewport()
+					}
+
+					// If in thread view and message is a reply to current thread parent
+					if m.state == stateThreadView && m.threadParentMessage != nil {
+						if apiMsg.ParentID != nil && *apiMsg.ParentID == m.threadParentMessage.ID {
+							// Check for duplicates in thread
+							threadDuplicate := false
+							for _, existingMsg := range m.threadMessages {
+								if existingMsg.ID == apiMsg.ID {
+									threadDuplicate = true
+									break
+								}
+							}
+							if !threadDuplicate {
+								m.threadMessages = append(m.threadMessages, apiMsg)
+							}
+						}
 					}
 				}
 			}
@@ -924,42 +984,76 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case messageUpdatedMsg:
 		if msg.err != nil {
 			m.status = errorStyle.Render(fmt.Sprintf("Failed to update message: %v", msg.err))
-			m.state = stateConversation
+			if m.state == stateEditingMessage {
+				m.state = stateConversation
+			}
 			return m, nil
 		}
-		// Update the message in the list
+		// Update the message in the main list
 		for i, existingMsg := range m.messages {
 			if existingMsg.ID == msg.message.ID {
 				m.messages[i] = *msg.message
 				break
 			}
 		}
+		// Update in thread list if applicable
+		if m.state == stateThreadView {
+			for i, existingMsg := range m.threadMessages {
+				if existingMsg.ID == msg.message.ID {
+					m.threadMessages[i] = *msg.message
+					break
+				}
+			}
+		}
 		m.updateMessageViewport()
 		m.status = successStyle.Render("Message updated successfully")
-		m.state = stateConversation
+		if m.state == stateEditingMessage {
+			if m.state == stateThreadView {
+				m.state = stateThreadView
+			} else {
+				m.state = stateConversation
+			}
+		}
 		m.editingMessage = nil
 		m.selectedMessageIndex = -1
-		m.messageInput.Focus() // Refocus input after successful edit
+		m.messageInput.Focus()
 		return m, nil
 
 	case messageDeletedMsg:
 		if msg.err != nil {
 			m.status = errorStyle.Render(fmt.Sprintf("Failed to delete message: %v", msg.err))
-			m.state = stateConversation
+			if m.state == stateConfirmDelete {
+				m.state = stateConversation
+			}
 			return m, nil
 		}
-		// Remove the message from the list
+		// Remove the message from the main list
 		for i, existingMsg := range m.messages {
 			if existingMsg.ID == msg.messageID {
 				m.messages = append(m.messages[:i], m.messages[i+1:]...)
 				break
 			}
 		}
+		// Remove from thread list if applicable
+		if m.state == stateThreadView {
+			for i, existingMsg := range m.threadMessages {
+				if existingMsg.ID == msg.messageID {
+					m.threadMessages = append(m.threadMessages[:i], m.threadMessages[i+1:]...)
+					break
+				}
+			}
+		}
 		m.updateMessageViewport()
 		m.status = successStyle.Render("Message deleted successfully")
-		m.state = stateConversation
+		if m.state == stateConfirmDelete {
+			if m.threadInput.Focused() || len(m.threadMessages) > 0 {
+				m.state = stateThreadView
+			} else {
+				m.state = stateConversation
+			}
+		}
 		m.selectedMessageIndex = -1
-		m.messageInput.Focus() // Refocus input after successful delete
+		m.messageInput.Focus()
 		return m, nil
 
 	case roomCreatedMsg:
@@ -1098,6 +1192,21 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if !skipRoomInput {
 				var cmd tea.Cmd
 				m.roomNameInput, cmd = m.roomNameInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		// Handle thread input in thread view state
+		if m.state == stateThreadView {
+			skipThreadInput := false
+			switch keyMsg.String() {
+			case "esc", "enter", "tab", "up", "down", "k", "j", "e", "d":
+				skipThreadInput = true
+			}
+			if !skipThreadInput && m.threadInput.Focused() {
+				var cmd tea.Cmd
+				m.threadInput, cmd = m.threadInput.Update(message)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -1450,7 +1559,35 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.replyingTo = nil
 			return m, cmd
 		case "enter":
-			// Send message
+			// If a message is selected and it has replies, enter thread view
+			if m.selectedMessageIndex >= 0 && m.selectedMessageIndex < len(m.messages) {
+				selectedMsg := m.messages[m.selectedMessageIndex]
+				// Check if this message has replies
+				hasReplies := false
+				for _, msg := range m.messages {
+					if msg.ParentID != nil && *msg.ParentID == selectedMsg.ID {
+						hasReplies = true
+						break
+					}
+				}
+				if hasReplies {
+					// Enter thread view
+					m.threadParentMessage = &selectedMsg
+					m.threadMessages = []api.Message{selectedMsg}
+					// Collect all replies
+					for _, msg := range m.messages {
+						if msg.ParentID != nil && *msg.ParentID == selectedMsg.ID {
+							m.threadMessages = append(m.threadMessages, msg)
+						}
+					}
+					m.state = stateThreadView
+					m.threadInput.Focus()
+					m.threadMessageIndex = -1
+					m.status = fmt.Sprintf("Thread: %d replies", len(m.threadMessages)-1)
+					return m, nil
+				}
+			}
+			// Otherwise, send message
 			content := strings.TrimSpace(m.messageInput.Value())
 			if content != "" && m.currentRoom != nil {
 				// Check for commands
@@ -1707,6 +1844,92 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.state = stateAdminRooms
 			m.status = ""
 		}
+
+	case stateThreadView:
+		switch msg.String() {
+		case "up", "k":
+			if m.threadInput.Focused() {
+				return m, nil
+			}
+			if m.threadMessageIndex > 0 {
+				m.threadMessageIndex--
+				selectedMsg := m.threadMessages[m.threadMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.status = helpStyle.Render("Press 'e' to edit, 'd' to delete, or arrow keys to navigate")
+				} else {
+					m.status = helpStyle.Render("Arrow keys to navigate")
+				}
+			}
+		case "down", "j":
+			if m.threadInput.Focused() {
+				return m, nil
+			}
+			if m.threadMessageIndex < len(m.threadMessages)-1 {
+				m.threadMessageIndex++
+				selectedMsg := m.threadMessages[m.threadMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.status = helpStyle.Render("Press 'e' to edit, 'd' to delete, or arrow keys to navigate")
+				} else {
+					m.status = helpStyle.Render("Arrow keys to navigate")
+				}
+			}
+		case "tab":
+			if m.threadInput.Focused() {
+				m.threadInput.Blur()
+				m.threadMessageIndex = 0
+			} else {
+				m.threadInput.Focus()
+			}
+		case "enter":
+			if !m.threadInput.Focused() {
+				return m, nil
+			}
+			content := strings.TrimSpace(m.threadInput.Value())
+			if content == "" {
+				return m, nil
+			}
+			if m.currentRoom == nil {
+				return m, nil
+			}
+			parentID := m.threadParentMessage.ID
+			m.status = "Sending reply..."
+			return m, sendMessageCmd(m.client, m.token, m.currentRoom.ID, content, &parentID)
+		case "e":
+			if m.threadInput.Focused() {
+				return m, nil
+			}
+			if m.threadMessageIndex >= 0 && m.threadMessageIndex < len(m.threadMessages) {
+				selectedMsg := m.threadMessages[m.threadMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.state = stateEditingMessage
+					m.editingMessage = &selectedMsg
+					m.editInput.SetValue(selectedMsg.Content)
+					m.editInput.Focus()
+					m.status = "Editing reply..."
+				}
+			}
+		case "d":
+			if m.threadInput.Focused() {
+				return m, nil
+			}
+			if m.threadMessageIndex >= 0 && m.threadMessageIndex < len(m.threadMessages) {
+				selectedMsg := m.threadMessages[m.threadMessageIndex]
+				if selectedMsg.UserID == m.user.ID {
+					m.state = stateConfirmDelete
+					m.editingMessage = &selectedMsg
+					m.status = "Delete this reply? (y/n)"
+				}
+			}
+		case "esc":
+			m.state = stateConversation
+			m.threadParentMessage = nil
+			m.threadMessages = nil
+			m.threadMessageIndex = 0
+			m.threadInput.SetValue("")
+			m.threadInput.Blur()
+			m.messageInput.Focus()
+			m.status = ""
+		}
 	}
 
 	return m, nil
@@ -1762,11 +1985,11 @@ func (m *Model) updateMessageViewport() {
 		}
 	}
 
-	// Recursive function to render a message and its replies
-	var renderMessage func(msgIndex int, indent int)
-	renderMessage = func(msgIndex int, indent int) {
+	// Render only top-level messages (no threading in main view)
+	for i := len(topLevel) - 1; i >= 0; i-- {
+		msgIndex := topLevel[i]
 		if msgIndex < 0 || msgIndex >= len(m.messages) {
-			return
+			continue
 		}
 
 		msg := m.messages[msgIndex]
@@ -1779,15 +2002,6 @@ func (m *Model) updateMessageViewport() {
 		// Check if this message is selected
 		isSelected := m.selectedMessageIndex == msgIndex
 
-		// Build indentation
-		indentStr := strings.Repeat("  ", indent)
-		var prefix string
-		if indent > 0 {
-			prefix = indentStr + "└─ "
-		} else {
-			prefix = "  "
-		}
-
 		// Build message line
 		var messageLine strings.Builder
 		messageLine.WriteString(helpStyle.Render(timestamp))
@@ -1796,28 +2010,23 @@ func (m *Model) updateMessageViewport() {
 		messageLine.WriteString(": ")
 		messageLine.WriteString(msg.Content)
 
+		// Add thread indicator if this message has replies
+		replyCount := len(repliesMap[msg.ID])
+		if replyCount > 0 {
+			messageLine.WriteString(" ")
+			messageLine.WriteString(helpStyle.Render(fmt.Sprintf("💬 %d", replyCount)))
+		}
+
 		// Highlight if selected
 		if isSelected {
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("11")). // Bright yellow
 				Bold(true).
-				Render("> " + prefix + messageLine.String()))
+				Render("> " + messageLine.String()))
 		} else {
-			b.WriteString(prefix + messageLine.String())
+			b.WriteString("  " + messageLine.String())
 		}
 		b.WriteString("\n")
-
-		// Render replies recursively (in chronological order)
-		if replies, hasReplies := repliesMap[msg.ID]; hasReplies {
-			for _, replyIdx := range replies {
-				renderMessage(replyIdx, indent+1)
-			}
-		}
-	}
-
-	// Render all top-level messages in reverse order (newest at bottom)
-	for i := len(topLevel) - 1; i >= 0; i-- {
-		renderMessage(topLevel[i], 0)
 	}
 
 	m.messageViewport.SetContent(b.String())
@@ -2233,6 +2442,81 @@ func (m Model) View() string {
 		b.WriteString(normalItem.Render("⚠ This will soft-delete the room. All messages will be preserved but the room will be hidden."))
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("Press 'y' to delete, 'n' or Esc to cancel"))
+
+	case stateThreadView:
+		if m.threadParentMessage == nil {
+			b.WriteString(errorStyle.Render("Error: No thread parent message"))
+			break
+		}
+
+		b.WriteString(titleStyle.Render("Thread View"))
+		b.WriteString(" ")
+		b.WriteString(statusStyle.Render("- " + m.user.Username))
+		b.WriteString("\n\n")
+
+		var threadContent strings.Builder
+		threadContent.WriteString(separatorStyle.Render("━━━ Parent Message ━━━"))
+		threadContent.WriteString("\n")
+
+		parentTimestamp := m.threadParentMessage.CreatedAt.Format("3:04 PM")
+		parentUsername := m.threadParentMessage.User.Username
+		threadContent.WriteString(helpStyle.Render(parentTimestamp))
+		threadContent.WriteString(" ")
+		threadContent.WriteString(selectedItem.Render(parentUsername))
+		threadContent.WriteString(": ")
+		threadContent.WriteString(m.threadParentMessage.Content)
+		threadContent.WriteString("\n\n")
+
+		threadContent.WriteString(separatorStyle.Render(fmt.Sprintf("━━━ Replies (%d) ━━━", len(m.threadMessages))))
+		threadContent.WriteString("\n")
+
+		if len(m.threadMessages) == 0 {
+			threadContent.WriteString(helpStyle.Render("  No replies yet. Be the first to reply!"))
+			threadContent.WriteString("\n")
+		} else {
+			for i, msg := range m.threadMessages {
+				timestamp := msg.CreatedAt.Format("3:04 PM")
+				username := msg.User.Username
+
+				isSelected := i == m.threadMessageIndex && !m.threadInput.Focused()
+
+				var messageLine strings.Builder
+				messageLine.WriteString(helpStyle.Render(timestamp))
+				messageLine.WriteString(" ")
+				messageLine.WriteString(selectedItem.Render(username))
+				messageLine.WriteString(": ")
+				messageLine.WriteString(msg.Content)
+
+				if isSelected {
+					threadContent.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color("11")).
+						Bold(true).
+						Render("> " + messageLine.String()))
+				} else {
+					threadContent.WriteString("  " + messageLine.String())
+				}
+				threadContent.WriteString("\n")
+			}
+		}
+
+		b.WriteString(borderStyle.Render(threadContent.String()))
+		b.WriteString("\n\n")
+
+		b.WriteString(m.threadInput.View())
+		b.WriteString("\n\n")
+
+		if m.threadInput.Focused() {
+			b.WriteString(helpStyle.Render("Enter: send reply | Tab: navigate messages | Esc: exit thread"))
+		} else if m.threadMessageIndex >= 0 && m.threadMessageIndex < len(m.threadMessages) {
+			selectedMsg := m.threadMessages[m.threadMessageIndex]
+			if selectedMsg.UserID == m.user.ID {
+				b.WriteString(helpStyle.Render("↑/↓: navigate | e: edit | d: delete | Tab: type | Esc: exit thread"))
+			} else {
+				b.WriteString(helpStyle.Render("↑/↓: navigate | Tab: type | Esc: exit thread"))
+			}
+		} else {
+			b.WriteString(helpStyle.Render("Tab: type reply | Esc: exit thread"))
+		}
 	}
 
 	return menuStyle.Render(b.String())
