@@ -1146,16 +1146,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateConversation {
 			skipMessageInput := false
 			// Only skip command keys when input is not focused (i.e., when navigating messages)
-			// When input is focused (typing/replying), allow all keys through except tab
+			// When input is focused (typing/replying), allow all keys through except tab, esc, enter
 			if !m.messageInput.Focused() {
 				switch keyMsg.String() {
 				case "tab", "esc", "enter", "up", "k", "down", "j", "pgup", "pgdown", "r", "e", "d":
 					skipMessageInput = true
 				}
 			} else {
-				// When focused, only skip tab (to toggle mode)
+				// When focused (including reply mode), skip tab, esc, enter (they trigger actions in handleKey)
 				switch keyMsg.String() {
-				case "tab":
+				case "tab", "esc", "enter":
 					skipMessageInput = true
 				}
 			}
@@ -1532,6 +1532,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.replyingTo != nil {
 				m.replyingTo = nil
 				m.messageInput.Placeholder = "Type a message... (ESC to go back)"
+				m.messageInput.Focus()
 				m.status = ""
 				return m, nil
 			}
@@ -1600,9 +1601,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 						parentID = &m.replyingTo.ID
 					}
 					cmd := sendMessageCmd(m.client, m.token, m.currentRoom.ID, content, parentID)
-					// Clear reply context after sending
+					// Clear reply context after sending and keep input focused
 					m.replyingTo = nil
 					m.messageInput.Placeholder = "Type a message... (ESC to go back)"
+					m.messageInput.Focus()
 					return m, cmd
 				}
 			}
@@ -1672,6 +1674,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				selectedMsg := m.messages[m.selectedMessageIndex]
 				m.replyingTo = &selectedMsg
 				m.selectedMessageIndex = -1
+				// Ensure message input is focused for typing reply
 				m.messageInput.Focus()
 				// Update placeholder to show reply context
 				replyTo := selectedMsg.User.Username

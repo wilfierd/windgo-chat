@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"chat-backend-go/config"
+	"chat-backend-go/middleware"
 	"chat-backend-go/models"
 	"strings"
 	"time"
@@ -11,7 +12,13 @@ import (
 
 // ListUsers returns other users for chat directory, optionally filtered by search query
 func ListUsers(c *fiber.Ctx) error {
-	currentUserID := c.Locals("userID").(uint)
+	// Get user ID from JWT middleware (type-safe)
+	currentUserID, ok := middleware.GetUserID(c)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
 	search := strings.ToLower(strings.TrimSpace(c.Query("search")))
 
 	var users []models.User

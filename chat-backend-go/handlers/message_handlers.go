@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"chat-backend-go/config"
+	"chat-backend-go/middleware"
 	"chat-backend-go/models"
 	"strconv"
 
@@ -10,9 +11,9 @@ import (
 
 // SendMessage creates a new message in a room
 func SendMessage(c *fiber.Ctx) error {
-	// Get user ID from JWT middleware (we'll assume it's set)
-	userID := c.Locals("userID")
-	if userID == nil {
+	// Get user ID from JWT middleware (type-safe)
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
 		return c.Status(401).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
@@ -57,7 +58,7 @@ func SendMessage(c *fiber.Ctx) error {
 
 	// Create message
 	message := models.Message{
-		UserID:   userID.(uint),
+		UserID:   userID,
 		RoomID:   req.RoomID,
 		Content:  req.Content,
 		ParentID: req.ParentID,
@@ -156,9 +157,9 @@ func GetRooms(c *fiber.Ctx) error {
 
 // UpdateMessage updates an existing message
 func UpdateMessage(c *fiber.Ctx) error {
-	// Get user ID from JWT middleware
-	userID := c.Locals("userID")
-	if userID == nil {
+	// Get user ID from JWT middleware (type-safe)
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
 		return c.Status(401).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
@@ -193,7 +194,7 @@ func UpdateMessage(c *fiber.Ctx) error {
 	}
 
 	// Check if user owns the message
-	if message.UserID != userID.(uint) {
+	if message.UserID != userID {
 		return c.Status(403).JSON(fiber.Map{
 			"error": "You can only edit your own messages",
 		})
@@ -222,9 +223,9 @@ func UpdateMessage(c *fiber.Ctx) error {
 
 // DeleteMessage soft deletes a message
 func DeleteMessage(c *fiber.Ctx) error {
-	// Get user ID from JWT middleware
-	userID := c.Locals("userID")
-	if userID == nil {
+	// Get user ID from JWT middleware (type-safe)
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
 		return c.Status(401).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
@@ -248,7 +249,7 @@ func DeleteMessage(c *fiber.Ctx) error {
 	}
 
 	// Check if user owns the message
-	if message.UserID != userID.(uint) {
+	if message.UserID != userID {
 		return c.Status(403).JSON(fiber.Map{
 			"error": "You can only delete your own messages",
 		})

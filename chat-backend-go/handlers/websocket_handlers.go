@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"chat-backend-go/middleware"
 	ws "chat-backend-go/websocket"
 	"fmt"
 	"log"
@@ -28,16 +29,16 @@ func InitWebSocketHub() {
 func WebSocketUpgrade(c *fiber.Ctx) error {
 	// Check if the request is a WebSocket upgrade request
 	if websocket.IsWebSocketUpgrade(c) {
-		// Get user ID from JWT middleware
-		userID := c.Locals("userID")
-		if userID == nil {
+		// Get user ID from JWT middleware (type-safe)
+		userID, ok := middleware.GetUserID(c)
+		if !ok {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "User not authenticated",
 			})
 		}
 
 		// Store userID in context for the WebSocket handler
-		c.Locals("wsUserID", userID.(uint))
+		c.Locals("wsUserID", userID)
 		return c.Next()
 	}
 

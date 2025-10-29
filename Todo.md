@@ -9,6 +9,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ## ✅ Completed Features (Recent Work)
 
 ### 1. **Core Authentication System** ✓
+
 - ✅ Email/password authentication (login & registration)
 - ✅ JWT token-based authentication (24h expiration)
 - ✅ GitHub OAuth (both web and device flow)
@@ -17,6 +18,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ Credential persistence in CLI (`~/.config/windgo/credentials.json`)
 
 ### 2. **Real-Time Messaging** ✓
+
 - ✅ WebSocket infrastructure with Hub/Client architecture
 - ✅ Real-time message broadcasting to room members
 - ✅ Join/leave room events
@@ -26,6 +28,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ Heartbeat ping/pong for connection health
 
 ### 3. **Message Management** ✓
+
 - ✅ Create messages (POST)
 - ✅ Edit messages (PUT) - users can edit their own messages
 - ✅ Delete messages (DELETE) - soft delete, users can delete their own
@@ -34,6 +37,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ Parent message data preloaded in responses
 
 ### 4. **Room Management (Admin)** ✓
+
 - ✅ Create rooms (POST /api/v1/rooms) - admin only
 - ✅ Update rooms (PUT /api/v1/rooms/:id) - admin only
 - ✅ Delete rooms (DELETE /api/v1/rooms/:id) - soft delete, admin only
@@ -43,6 +47,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ CLI admin UI for room management
 
 ### 5. **Terminal CLI Client** ✓
+
 - ✅ Bubble Tea TUI framework implementation
 - ✅ Login menu (email or GitHub device flow)
 - ✅ Main menu navigation
@@ -59,6 +64,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ Navigation command improvements
 
 ### 6. **Database & Backend Architecture** ✓
+
 - ✅ PostgreSQL with GORM ORM
 - ✅ Auto-migration on startup
 - ✅ Optimized indexes (users, messages, rooms)
@@ -68,6 +74,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ Activity tracking middleware
 
 ### 7. **Documentation** ✓
+
 - ✅ CLAUDE.md - Comprehensive project guide
 - ✅ MESSAGE_THREADING.md - Threading implementation docs
 - ✅ MESSAGE_EDITING_DELETION.md - Edit/delete docs
@@ -76,6 +83,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ UI_FLOW_VISUAL.md - Visual UI flow guide
 
 ### 8. **CI/CD & DevOps** ✓
+
 - ✅ GitHub Actions workflow
 - ✅ Discord notifications for builds
 - ✅ Binary builds tracked in git
@@ -85,12 +93,14 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ## 🚧 Known Issues & Bug Fixes Needed
 
 ### High Priority Bugs:
-1. ⚠️ **Reply text input error** - Some text input issues remain when replying to messages
-2. ⚠️ **Type assertion safety** - userID type consistency between middleware and handlers (uint vs int vs float64)
-3. ⚠️ **Race condition** - Room name uniqueness check should use DB unique constraint in addition to preflight check
+
+1. ✅ **Reply text input error** - FIXED: Added proper focus management in reply mode
+2. ✅ **Type assertion safety** - FIXED: Added type-safe GetUserID helper with proper error handling
+3. ✅ **Race condition** - FIXED: Added unique constraint to room.name with proper error handling
 
 ### Medium Priority:
-4. ⚠️ **WebSocket reconnection** - No auto-reconnect if connection drops
+
+4. ✅ **WebSocket reconnection** - FIXED: Implemented auto-reconnect with exponential backoff and room rejoin
 5. ⚠️ **Error handling** - Some error messages could be more user-friendly in CLI
 6. ⚠️ **Input validation** - Server-side room name length limits not enforced
 
@@ -101,18 +111,21 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ### **PHASE 1: Bug Fixes & Stability** (Immediate - Week 1-2)
 
 #### Critical:
-- [ ] **Fix reply text input error** - Resolve remaining input handling issues
-- [ ] **Add type safety** - Ensure userID type consistency (middleware → handlers)
-- [ ] **Add DB unique constraint** - Add unique index on room.name to prevent race conditions
-- [ ] **Add WebSocket auto-reconnect** - Handle connection drops gracefully in CLI
+
+- [x] **Fix reply text input error** - Resolve remaining input handling issues ✓
+- [x] **Add type safety** - Ensure userID type consistency (middleware → handlers) ✓
+- [x] **Add DB unique constraint** - Add unique index on room.name to prevent race conditions ✓
+- [x] **Add WebSocket auto-reconnect** - Handle connection drops gracefully in CLI ✓
 
 #### Testing & Validation:
+
 - [ ] **Integration tests** - Test room CRUD with admin/non-admin users
 - [ ] **Manual QA** - Test all CLI flows end-to-end
 - [ ] **Verify soft-delete behavior** - Ensure deleted rooms/messages are hidden correctly
 - [ ] **Load testing** - Test WebSocket with multiple concurrent clients
 
 #### Code Quality:
+
 - [ ] **Add recovery middleware** - Catch panics in handlers
 - [ ] **Improve error messages** - Better user-facing error messages
 - [ ] **Add input validation** - Server-side length limits and sanitization
@@ -123,13 +136,16 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ### **PHASE 2: Core Feature Enhancements** (Week 3-4)
 
 #### High Priority Features:
+
 - [ ] **Direct messaging (DMs)** - Private 1-on-1 conversations
+
   - New room type: "direct" vs "group"
   - Room membership table (many-to-many: users ↔ rooms)
   - API endpoints: POST /api/v1/rooms/direct, GET /api/v1/rooms/direct
   - CLI UI: "Direct Messages" tab in lobby
 
 - [ ] **Unread message tracking**
+
   - New table: user_room_last_read (user_id, room_id, last_read_message_id, last_read_at)
   - Endpoint: POST /api/v1/rooms/:id/read (mark as read)
   - CLI: Show unread count badges on rooms
@@ -141,13 +157,16 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - Permission checks: Can user post to room? Can user see room?
 
 #### Medium Priority:
+
 - [ ] **Message reactions/emoji** - React to messages with emoji
+
   - New table: message_reactions (message_id, user_id, emoji, created_at)
   - Endpoint: POST /api/v1/messages/:id/reactions
   - WebSocket: Broadcast reaction events
   - CLI: Show reactions under messages, add with keyboard shortcut
 
 - [ ] **Rate limiting** - Prevent spam
+
   - Use golang.org/x/time/rate or github.com/ulule/limiter
   - Per-user rate limits: 10 messages/minute, 60 requests/minute
   - Return 429 Too Many Requests with Retry-After header
@@ -159,50 +178,73 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ---
 
-### **PHASE 3: User Experience Improvements** (Week 5-6)
+### **PHASE 3: Secure File Transfer & User Experience** (Week 5-6)
 
-- [ ] **File/image uploads** - Share files in chat
-  - Blob storage (S3, MinIO, or local filesystem)
-  - File upload endpoint: POST /api/v1/uploads (multipart/form-data)
-  - Message.attachment_url field
-  - CLI: Upload with /upload command or file picker
+- [ ] **Secure file transfer** - Private file sharing for sensitive data (keys, configs, documents)
+
+  - End-to-end encryption for file content
+  - Direct peer-to-peer transfer when possible (WebRTC data channels)
+  - Encrypted blob storage fallback (server-side encrypted at rest)
+  - File metadata: name, size, hash (SHA-256), expiration
+  - Transfer endpoints:
+    - POST /api/v1/files/offer (sender initiates transfer)
+    - GET /api/v1/files/:id/accept (receiver accepts)
+    - WebSocket: file transfer events and progress
+  - CLI features:
+    - /send-file command with local file path
+    - File receive confirmation dialog
+    - Progress bar during transfer
+    - Automatic cleanup after download
+    - No persistent storage of decrypted files on server
+  - Security features:
+    - Password-protected file transfers (optional)
+    - One-time download links (file deleted after retrieval)
+    - Transfer expiration (24h default, configurable)
+    - File size limits (100MB for CLI focus)
 
 - [ ] **User mentions (@username)** - Mention users in messages
+
   - Parse @username in message content
   - Store mentions: message_mentions table (message_id, mentioned_user_id)
   - Endpoint: GET /api/v1/mentions (get messages mentioning me)
   - CLI: Autocomplete usernames, highlight mentions
 
 - [ ] **Message search** - Search message history
+
   - Endpoint: GET /api/v1/search?q=query&room_id=1
   - PostgreSQL full-text search or Elasticsearch
   - CLI: /search command or Ctrl+F shortcut
 
 - [ ] **Read receipts** - See who read messages
+
   - Track: user_message_reads (user_id, message_id, read_at)
   - Endpoint: GET /api/v1/messages/:id/reads
   - CLI: Show "Seen by" under messages
 
-- [ ] **Push notifications** - Notify users of new messages
+- [ ] **CLI notifications** - Notify users of new messages/mentions
   - WebSocket notification events for mentions/DMs
   - CLI: Desktop notifications (beeep library or system notifications)
-  - Optional: Email/SMS notifications for offline users
+  - Terminal bell/alert on mentions
+  - Notification sound toggle option
 
 ---
 
 ### **PHASE 4: Performance & Scalability** (Week 7-8)
 
 - [ ] **Message caching** - Reduce DB load
+
   - Redis cache for recent messages (last 100 per room)
   - Cache invalidation on new/edit/delete
   - TTL: 1 hour
 
 - [ ] **Database optimization**
+
   - Add composite indexes: (room_id, created_at), (user_id, room_id)
   - Query optimization: EXPLAIN ANALYZE slow queries
   - Consider partitioning messages table by date if >10M rows
 
 - [ ] **WebSocket scaling** - Support horizontal scaling
+
   - Use Redis Pub/Sub for multi-instance message broadcasting
   - Sticky sessions or consistent hashing for WebSocket connections
 
@@ -216,34 +258,41 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ### **PHASE 5: Advanced Features** (Week 9+)
 
 - [ ] **Message threading UI improvements** - Better thread visualization
+
   - Nested thread view in CLI
   - Thread summary/preview
   - Unread count per thread
 
 - [ ] **Room categories/tags** - Organize rooms
+
   - Room.category field (e.g., "work", "social", "announcements")
   - Filter rooms by category in CLI
 
-- [ ] **User profiles** - Rich user profiles
-  - Bio, status message, timezone, profile picture
+- [ ] **User profiles** - CLI-focused user profiles
+
+  - Bio, status message, timezone, public key (for secure file transfers)
   - Endpoint: GET /api/v1/users/:id, PUT /api/v1/users/me
   - CLI: View profile command
 
 - [ ] **Audit logging** - Track admin actions
+
   - Audit log table (user_id, action, resource_type, resource_id, timestamp)
   - Log: room create/update/delete, user ban/unban, etc.
   - Endpoint: GET /api/v1/admin/audit-log
 
 - [ ] **Room restore/undelete** - Recover deleted rooms
+
   - Endpoint: POST /api/v1/admin/rooms/:id/restore
   - CLI: Admin can view and restore deleted rooms
 
 - [ ] **Bulk admin operations**
+
   - Bulk delete messages
   - Bulk invite users to room
   - Export room history to JSON/CSV
 
 - [ ] **Advanced search** - Search with filters
+
   - Search by user, date range, room, has:link, has:file
   - Search syntax: from:@username after:2024-01-01
 
@@ -257,6 +306,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ## 🧪 Testing Strategy
 
 ### Unit Tests (Priority)
+
 - [ ] Handler tests (mock DB with sqlmock or testify)
 - [ ] API client tests (mock HTTP with httptest)
 - [ ] WebSocket hub/client tests
@@ -264,15 +314,18 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] Message threading validation tests
 
 ### Integration Tests
+
 - [ ] End-to-end API tests (start test server, call endpoints)
 - [ ] WebSocket integration tests (connect, join room, send/receive)
 - [ ] Database integration tests (use test DB)
 
 ### CLI Tests
+
 - [ ] Business logic tests (separate from UI)
 - [ ] End-to-end CLI tests (simulate user input, check output)
 
 ### Load Tests
+
 - [ ] WebSocket load test (100+ concurrent connections)
 - [ ] Message throughput test (messages/second)
 - [ ] Database query performance tests
@@ -282,11 +335,13 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ## 📦 Deployment & Infrastructure
 
 ### Containerization
+
 - [ ] Dockerfile for backend
 - [ ] Docker Compose for local dev (backend + postgres + redis)
 - [ ] Multi-stage build for smaller images
 
 ### Production Readiness
+
 - [ ] Environment-based config (dev/staging/prod)
 - [ ] Health check endpoints (/health, /ready)
 - [ ] Metrics/observability (Prometheus, Grafana)
@@ -295,6 +350,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] Secrets management (Vault, AWS Secrets Manager)
 
 ### CLI Distribution
+
 - [ ] GitHub Releases with compiled binaries
 - [ ] Homebrew formula (Mac)
 - [ ] Debian/RPM packages (Linux)
@@ -317,31 +373,47 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ## 🔒 Security Enhancements
 
+### Critical Security Features:
+
+- [ ] **End-to-end encryption** - Encrypt messages before sending (critical for privacy-focused app)
+- [ ] **Secure key exchange** - Implement secure key exchange protocol (ECDH)
+- [ ] **File transfer encryption** - AES-256 encryption for files in transit
+- [ ] **Zero-knowledge server** - Server cannot decrypt user content
+
+### Standard Security:
+
 - [ ] Rate limiting (API & WebSocket)
-- [ ] Input sanitization (XSS prevention)
+- [ ] Input sanitization (prevent injection attacks)
 - [ ] SQL injection prevention audit (GORM should handle, but verify)
 - [ ] CSRF protection for web OAuth flow
-- [ ] Content Security Policy headers
 - [ ] Secrets rotation mechanism
 - [ ] User ban/suspension system
 - [ ] Report abuse system
-- [ ] Message moderation/filtering (profanity, spam)
+- [ ] Message moderation/filtering (spam detection)
 
 ---
 
 ## 🎨 Future Ideas (Brainstorm)
 
-- Voice/video calls (WebRTC)
-- Screen sharing
-- Bots/integrations (Slack-like apps)
-- Custom emoji
-- Message pinning
-- Polls/surveys
-- Scheduled messages
-- Message translation
-- Dark/light theme for CLI
-- Multi-server federation (Matrix-like)
-- End-to-end encryption (Signal protocol)
+- **CLI-Focused Features:**
+  - Bots/integrations (CLI scripts, webhooks)
+  - Message pinning
+  - Scheduled messages
+  - Dark/light theme for CLI
+  - Custom keybindings
+  - Export chat logs (encrypted backup)
+  - Vim/Emacs keybinding modes
+- **Advanced Security:**
+  - End-to-end encryption (Signal protocol)
+  - Multi-server federation (Matrix-like)
+  - Zero-knowledge architecture
+  - Secure message self-destruct timer
+  - Encrypted file vault (personal storage)
+- **Developer Tools:**
+  - Code snippet sharing with syntax highlighting
+  - Terminal output sharing
+  - Git integration (share commits, diffs)
+  - Command history sharing
 
 ---
 
@@ -360,17 +432,24 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ## 🏁 Current Sprint Focus (Based on Recent Commits)
 
 ### ✅ Completed in Last Sprint:
+
 1. Room CRUD implementation (da6c3fa)
 2. Navigation and command fixes (31b97d0)
 3. Fixed navigation commands (12751a0)
 4. Workflow updates (8a1de52, c610b03)
+5. **Critical bug fixes completed:**
+   - Reply text input focus management fixed
+   - Type-safe userID context handling (middleware.GetUserID helper)
+   - DB unique constraint on room.name (with error handling)
+   - WebSocket auto-reconnect with exponential backoff
 
 ### 🎯 Next Sprint Goals (Week 1-2):
-1. Fix reply text input error (HIGH PRIORITY)
-2. Add comprehensive testing (unit + integration)
-3. Implement WebSocket auto-reconnect
-4. Add rate limiting
-5. Start work on Direct Messaging
+
+1. Add comprehensive testing (unit + integration)
+2. Add rate limiting
+3. Start work on Direct Messaging
+4. Improve error messages in CLI
+5. Add server-side input validation
 
 ---
 

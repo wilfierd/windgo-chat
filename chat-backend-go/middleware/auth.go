@@ -7,6 +7,13 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// Context key type for type-safe context values
+type contextKey string
+
+const (
+	UserIDKey contextKey = "userID"
+)
+
 // AuthRequired middleware validates JWT token and extracts user ID
 func AuthRequired() fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -41,8 +48,8 @@ func AuthRequired() fiber.Handler {
 			})
 		}
 
-		// Store user ID in context for use in handlers
-		c.Locals("userID", userID)
+		// Store user ID in context for use in handlers (as uint for type safety)
+		c.Locals(string(UserIDKey), userID)
 
 		return c.Next()
 	}
@@ -55,7 +62,7 @@ func OptionalAuth() fiber.Handler {
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 			if userID, err := utils.ValidateJWT(tokenString); err == nil {
-				c.Locals("userID", userID)
+				c.Locals(string(UserIDKey), userID)
 			}
 		}
 		return c.Next()
@@ -91,8 +98,8 @@ func WebSocketAuth() fiber.Handler {
 			})
 		}
 
-		// Store user ID in context for use in handlers
-		c.Locals("userID", userID)
+		// Store user ID in context for use in handlers (as uint for type safety)
+		c.Locals(string(UserIDKey), userID)
 
 		return c.Next()
 	}

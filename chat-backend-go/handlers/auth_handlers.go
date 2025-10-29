@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"chat-backend-go/config"
+	"chat-backend-go/middleware"
 	"chat-backend-go/models"
 	"chat-backend-go/utils"
 
@@ -141,7 +142,13 @@ func Login(c *fiber.Ctx) error {
 
 // GetProfile returns the current user's profile
 func GetProfile(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uint)
+	// Get user ID from JWT middleware (type-safe)
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
 
 	var user models.User
 	if err := config.DB.First(&user, userID).Error; err != nil {
