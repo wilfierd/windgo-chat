@@ -51,15 +51,7 @@ func CreateRoom(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check if room with same name already exists
-	var existingRoom models.Room
-	if err := config.DB.Where("name = ?", req.Name).First(&existingRoom).Error; err == nil {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error": "Room with this name already exists",
-		})
-	}
-
-	// Create new room
+	// Create new room (allow duplicate names - they'll be distinguished by ID)
 	room := models.Room{
 		Name: req.Name,
 	}
@@ -136,15 +128,7 @@ func UpdateRoom(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check if another room with same name already exists
-	var existingRoom models.Room
-	if err := config.DB.Where("name = ? AND id != ?", req.Name, roomID).First(&existingRoom).Error; err == nil {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error": "Room with this name already exists",
-		})
-	}
-
-	// Update room
+	// Update room (allow duplicate names - they'll be distinguished by ID)
 	room.Name = req.Name
 	if err := config.DB.Save(&room).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
