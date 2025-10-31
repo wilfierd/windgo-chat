@@ -3,6 +3,7 @@ package main
 import (
 	"chat-backend-go/config"
 	"chat-backend-go/handlers"
+	"chat-backend-go/middleware"
 	"chat-backend-go/routes"
 	"chat-backend-go/utils"
 	"log"
@@ -14,19 +15,43 @@ import (
 )
 
 func main() {
+	// Initialize structured logger
+	utils.InitLogger()
+	utils.Logger.Info("Starting WindGo Chat Backend...")
+
 	// Initialize database
 	config.ConnectDB()
+	utils.Logger.Info("Database connected successfully")
 
 	// Seed demo users and rooms
 	utils.SeedDemoUsers()
 	utils.SeedDemoRooms()
+	utils.Logger.Info("Demo data seeded")
 
 	// Initialize WebSocket hub
 	handlers.InitWebSocketHub()
-	log.Println("WebSocket hub initialized")
+	utils.Logger.Info("WebSocket hub initialized")
 
-	// Create Fiber app
-	app := fiber.New()
+	// Create Fiber app with custom error handler
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			utils.LogError("Fiber error handler", err, map[string]interface{}{
+				"path":   c.Path(),
+				"method": c.Method(),
+				"code":   code,
+			})
+			return c.Status(code).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		},
+	})
+
+	// Recovery middleware - must be first to catch all panics
+	app.Use(middleware.Recovery())
 
 	// Logger middleware for debugging
 	app.Use(logger.New(logger.Config{

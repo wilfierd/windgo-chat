@@ -6,7 +6,9 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/gofiber/websocket/v2 v2.2.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
+	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/crypto v0.43.0
 	golang.org/x/oauth2 v0.30.0
 	gorm.io/driver/postgres v1.6.0

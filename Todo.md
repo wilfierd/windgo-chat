@@ -119,17 +119,17 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 #### Testing & Validation:
 
-- [ ] **Integration tests** - Test room CRUD with admin/non-admin users
-- [ ] **Manual QA** - Test all CLI flows end-to-end
-- [ ] **Verify soft-delete behavior** - Ensure deleted rooms/messages are hidden correctly
-- [ ] **Load testing** - Test WebSocket with multiple concurrent clients
+- [x] **Integration tests** - Test room CRUD with admin/non-admin users
+- [x] **Manual QA** - Test all CLI flows end-to-end
+- [x] **Verify soft-delete behavior** - Ensure deleted rooms/messages are hidden correctly
+- [x] **Load testing** - Test WebSocket with multiple concurrent clients
 
 #### Code Quality:
 
-- [ ] **Add recovery middleware** - Catch panics in handlers
-- [ ] **Improve error messages** - Better user-facing error messages
-- [ ] **Add input validation** - Server-side length limits and sanitization
-- [ ] **Add logging** - Structured logging for debugging (e.g., logrus or zap)
+- [x] **Add recovery middleware** - Catch panics in handlers
+- [x] **Improve error messages** - Better user-facing error messages
+- [x] **Add input validation** - Server-side length limits and sanitization
+- [x] **Add logging** - Structured logging for debugging (e.g., logrus or zap)
 
 ---
 
@@ -453,6 +453,6 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ---
 
-**Last Updated:** Based on commits through c610b03  
-**Project Phase:** Post-MVP, entering stability & feature enhancement phase  
+**Last Updated:** Based on commits through c610b03
+**Project Phase:** Post-MVP, entering stability & feature enhancement phase
 **Primary Goal:** Bug fixes → Testing → DM implementation → Performance optimization

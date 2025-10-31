@@ -3,6 +3,7 @@ package handlers
 import (
 	"chat-backend-go/config"
 	"chat-backend-go/models"
+	"chat-backend-go/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -13,23 +14,24 @@ func CreateRoom(c *fiber.Ctx) error {
 	// Get user ID from context
 	userID, ok := c.Locals("userID").(uint)
 	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Unauthorized",
-		})
+		return utils.RespondUnauthorized(c, utils.ErrUnauthorized)
 	}
 
 	// Check if user is admin
 	var user models.User
 	if err := config.DB.First(&user, userID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "User not found",
+		utils.LogError("Failed to fetch user in CreateRoom", err, map[string]interface{}{
+			"user_id": userID,
 		})
+		return utils.RespondNotFound(c, utils.ErrUserNotFound)
 	}
 
 	if user.Role != "admin" {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Admin access required",
+		utils.LogWarn("Non-admin user attempted to create room", map[string]interface{}{
+			"user_id":  userID,
+			"username": user.Username,
 		})
+		return utils.RespondForbidden(c, utils.ErrInsufficientPrivilege)
 	}
 
 	// Parse request body
@@ -39,33 +41,31 @@ func CreateRoom(c *fiber.Ctx) error {
 
 	var req CreateRoomRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+		return utils.RespondBadRequest(c, "Invalid request data. Please check your input.")
 	}
 
-	// Validate room name
-	if req.Name == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Room name is required",
-		})
+	// Validate and sanitize room name
+	sanitizedName, err := utils.ValidateAndSanitizeRoomName(req.Name)
+	if err != nil {
+		return utils.RespondWithValidationError(c, err)
 	}
 
 	// Create new room (allow duplicate names - they'll be distinguished by ID)
 	room := models.Room{
-		Name: req.Name,
+		Name: sanitizedName,
 	}
 
 	if err := config.DB.Create(&room).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to create room",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "CreateRoom")
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"message": "Room created successfully",
-		"room":    room,
+	utils.LogInfo("Room created successfully", map[string]interface{}{
+		"room_id":   room.ID,
+		"room_name": room.Name,
+		"user_id":   userID,
 	})
+
+	return utils.RespondCreated(c, "Room created successfully", room)
 }
 
 // UpdateRoom updates an existing chat room (admin only)
@@ -73,32 +73,31 @@ func UpdateRoom(c *fiber.Ctx) error {
 	// Get user ID from context
 	userID, ok := c.Locals("userID").(uint)
 	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Unauthorized",
-		})
+		return utils.RespondUnauthorized(c, utils.ErrUnauthorized)
 	}
 
 	// Check if user is admin
 	var user models.User
 	if err := config.DB.First(&user, userID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "User not found",
+		utils.LogError("Failed to fetch user in UpdateRoom", err, map[string]interface{}{
+			"user_id": userID,
 		})
+		return utils.RespondNotFound(c, utils.ErrUserNotFound)
 	}
 
 	if user.Role != "admin" {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Admin access required",
+		utils.LogWarn("Non-admin user attempted to update room", map[string]interface{}{
+			"user_id":  userID,
+			"username": user.Username,
 		})
+		return utils.RespondForbidden(c, utils.ErrInsufficientPrivilege)
 	}
 
 	// Get room ID from URL params
 	roomIDStr := c.Params("id")
 	roomID, err := strconv.ParseUint(roomIDStr, 10, 32)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid room ID",
-		})
+		return utils.RespondBadRequest(c, "Invalid room ID format")
 	}
 
 	// Parse request body
@@ -108,38 +107,34 @@ func UpdateRoom(c *fiber.Ctx) error {
 
 	var req UpdateRoomRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+		return utils.RespondBadRequest(c, "Invalid request data. Please check your input.")
 	}
 
-	// Validate room name
-	if req.Name == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Room name is required",
-		})
+	// Validate and sanitize room name
+	sanitizedName, err := utils.ValidateAndSanitizeRoomName(req.Name)
+	if err != nil {
+		return utils.RespondWithValidationError(c, err)
 	}
 
 	// Check if room exists
 	var room models.Room
 	if err := config.DB.First(&room, uint(roomID)).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Room not found",
-		})
+		return utils.RespondNotFound(c, utils.ErrRoomNotFound)
 	}
 
 	// Update room (allow duplicate names - they'll be distinguished by ID)
-	room.Name = req.Name
+	room.Name = sanitizedName
 	if err := config.DB.Save(&room).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to update room",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "UpdateRoom")
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "Room updated successfully",
-		"room":    room,
+	utils.LogInfo("Room updated successfully", map[string]interface{}{
+		"room_id":   room.ID,
+		"room_name": room.Name,
+		"user_id":   userID,
 	})
+
+	return utils.RespondSuccess(c, "Room updated successfully", room)
 }
 
 // DeleteRoom soft deletes a chat room (admin only)
@@ -147,52 +142,51 @@ func DeleteRoom(c *fiber.Ctx) error {
 	// Get user ID from context
 	userID, ok := c.Locals("userID").(uint)
 	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Unauthorized",
-		})
+		return utils.RespondUnauthorized(c, utils.ErrUnauthorized)
 	}
 
 	// Check if user is admin
 	var user models.User
 	if err := config.DB.First(&user, userID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "User not found",
+		utils.LogError("Failed to fetch user in DeleteRoom", err, map[string]interface{}{
+			"user_id": userID,
 		})
+		return utils.RespondNotFound(c, utils.ErrUserNotFound)
 	}
 
 	if user.Role != "admin" {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Admin access required",
+		utils.LogWarn("Non-admin user attempted to delete room", map[string]interface{}{
+			"user_id":  userID,
+			"username": user.Username,
 		})
+		return utils.RespondForbidden(c, utils.ErrInsufficientPrivilege)
 	}
 
 	// Get room ID from URL params
 	roomIDStr := c.Params("id")
 	roomID, err := strconv.ParseUint(roomIDStr, 10, 32)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid room ID",
-		})
+		return utils.RespondBadRequest(c, "Invalid room ID format")
 	}
 
 	// Check if room exists
 	var room models.Room
 	if err := config.DB.First(&room, uint(roomID)).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Room not found",
-		})
+		return utils.RespondNotFound(c, utils.ErrRoomNotFound)
 	}
 
 	// Soft delete room (GORM will set DeletedAt timestamp)
 	if err := config.DB.Delete(&room).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to delete room",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "DeleteRoom")
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "Room deleted successfully",
+	utils.LogInfo("Room soft-deleted successfully", map[string]interface{}{
+		"room_id":   room.ID,
+		"room_name": room.Name,
+		"user_id":   userID,
 	})
+
+	return utils.RespondSuccess(c, "Room deleted successfully", nil)
 }
 
 // GetRoomByID retrieves a single room by ID
@@ -201,19 +195,13 @@ func GetRoomByID(c *fiber.Ctx) error {
 	roomIDStr := c.Params("id")
 	roomID, err := strconv.ParseUint(roomIDStr, 10, 32)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid room ID",
-		})
+		return utils.RespondBadRequest(c, "Invalid room ID format")
 	}
 
 	var room models.Room
 	if err := config.DB.First(&room, uint(roomID)).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Room not found",
-		})
+		return utils.RespondNotFound(c, utils.ErrRoomNotFound)
 	}
 
-	return c.JSON(fiber.Map{
-		"room": room,
-	})
+	return utils.RespondSuccess(c, "Room retrieved successfully", room)
 }
