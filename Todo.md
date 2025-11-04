@@ -137,12 +137,14 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 #### High Priority Features:
 
-- [ ] **Direct messaging (DMs)** - Private 1-on-1 conversations
+- [x] **Direct messaging (DMs)** - Private 1-on-1 conversations ✓
 
-  - New room type: "direct" vs "group"
-  - Room membership table (many-to-many: users ↔ rooms)
-  - API endpoints: POST /api/v1/rooms/direct, GET /api/v1/rooms/direct
-  - CLI UI: "Direct Messages" tab in lobby
+  - ✅ New room type: "direct" vs "group"
+  - ✅ Room membership table (many-to-many: users ↔ rooms)
+  - ✅ API endpoints: POST /api/v1/rooms/direct, GET /api/v1/rooms/direct
+  - ✅ CLI UI: "Direct Messages" tab in lobby
+  - ✅ Spec created: `.kiro/specs/direct-messaging/` (requirements, design, tasks)
+  - 📝 Implementation ready: 13 core tasks + 2 optional tasks defined
 
 - [ ] **Unread message tracking**
 
@@ -445,11 +447,12 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ### 🎯 Next Sprint Goals (Week 1-2):
 
-1. Add comprehensive testing (unit + integration)
-2. Add rate limiting
-3. Start work on Direct Messaging
-4. Improve error messages in CLI
-5. Add server-side input validation
+1. ✅ **Direct Messaging spec completed** - Ready for implementation
+2. Implement Direct Messaging feature (see `.kiro/specs/direct-messaging/tasks.md`)
+3. Add comprehensive testing (unit + integration)
+4. Add rate limiting
+5. Improve error messages in CLI
+6. Add server-side input validation
 
 ---
 
