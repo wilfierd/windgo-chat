@@ -17,9 +17,12 @@ func MessageRoutes(app *fiber.App) {
 	// Protected routes (require authentication and track activity)
 	protected := api.Use(middleware.AuthRequired(), middleware.TrackActivity())
 
-	// Message routes
+	// Message routes with room membership verification
+	protected.Get("/rooms/:roomId/messages", middleware.RequireRoomMembership(), handlers.GetMessages)
+	protected.Post("/rooms/:id/messages", middleware.RequireRoomMembership(), handlers.SendMessage)
+	
+	// General message routes (without room-specific membership check)
 	protected.Post("/messages", handlers.SendMessage)
-	protected.Get("/rooms/:roomId/messages", handlers.GetMessages)
 	protected.Put("/messages/:id", handlers.UpdateMessage)
 	protected.Delete("/messages/:id", handlers.DeleteMessage)
 
@@ -27,4 +30,11 @@ func MessageRoutes(app *fiber.App) {
 	protected.Post("/rooms", handlers.CreateRoom)
 	protected.Put("/rooms/:id", handlers.UpdateRoom)
 	protected.Delete("/rooms/:id", handlers.DeleteRoom)
+
+	// Direct message routes
+	protected.Post("/rooms/direct", handlers.CreateDirectRoom)
+	protected.Get("/rooms/direct", handlers.GetDirectRooms)
+
+	// Room participants route
+	protected.Get("/rooms/:id/participants", handlers.GetRoomParticipants)
 }

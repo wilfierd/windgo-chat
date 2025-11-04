@@ -6,7 +6,10 @@ package utils
 import (
 	"chat-backend-go/config"
 	"chat-backend-go/models"
+	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // GetUserByEmail - Optimized query using email index
@@ -111,4 +114,17 @@ func GetUserStats(userID uint) (map[string]interface{}, error) {
 	}
 
 	return stats, nil
+}
+
+// VerifyRoomMembership checks if a user is a member of a room
+// Returns an error if the user is not a member
+func VerifyRoomMembership(db *gorm.DB, userID, roomID uint) error {
+	var membership models.RoomMembership
+	if err := db.Where("user_id = ? AND room_id = ?", userID, roomID).First(&membership).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("you are not a participant of this conversation")
+		}
+		return err
+	}
+	return nil
 }

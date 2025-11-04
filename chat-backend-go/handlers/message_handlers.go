@@ -14,9 +14,7 @@ func SendMessage(c *fiber.Ctx) error {
 	// Get user ID from JWT middleware (type-safe)
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{
-			"error": "User not authenticated",
-		})
+		return utils.RespondUnauthorized(c, "User not authenticated")
 	}
 
 	type MessageRequest struct {
@@ -27,32 +25,29 @@ func SendMessage(c *fiber.Ctx) error {
 
 	var req MessageRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+		return utils.RespondBadRequest(c, "Invalid request body")
 	}
 
 	// Validate room exists
 	var room models.Room
 	if err := config.DB.First(&room, req.RoomID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Room not found",
-		})
+		return utils.RespondNotFound(c, "Room not found")
+	}
+
+	// Verify sender is a room participant (for direct messages and group rooms)
+	if err := utils.VerifyRoomMembership(config.DB, userID, req.RoomID); err != nil {
+		return utils.RespondForbidden(c, err.Error())
 	}
 
 	// Validate parent message exists if ParentID is provided
 	if req.ParentID != nil {
 		var parentMsg models.Message
 		if err := config.DB.First(&parentMsg, *req.ParentID).Error; err != nil {
-			return c.Status(404).JSON(fiber.Map{
-				"error": "Parent message not found",
-			})
+			return utils.RespondNotFound(c, "Parent message not found")
 		}
 		// Ensure parent message is in the same room
 		if parentMsg.RoomID != req.RoomID {
-			return c.Status(400).JSON(fiber.Map{
-				"error": "Parent message must be in the same room",
-			})
+			return utils.RespondBadRequest(c, "Parent message must be in the same room")
 		}
 	}
 
@@ -65,16 +60,18 @@ func SendMessage(c *fiber.Ctx) error {
 	}
 
 	if err := config.DB.Create(&message).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to create message",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "SendMessage - create message")
+	}
+
+	// Update room's last activity timestamp (UpdatedAt)
+	if err := config.DB.Model(&room).Update("updated_at", message.CreatedAt).Error; err != nil {
+		// Log error but don't fail the request
+		// The message was created successfully
 	}
 
 	// Load user data and parent message for response
 	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to load message data",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "SendMessage - load message data")
 	}
 
 	// Broadcast message to WebSocket clients in the room
@@ -88,20 +85,27 @@ func SendMessage(c *fiber.Ctx) error {
 
 // GetMessages retrieves messages for a specific room
 func GetMessages(c *fiber.Ctx) error {
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		return utils.RespondUnauthorized(c, "User not authenticated")
+	}
+
 	roomIDStr := c.Params("roomId")
 	roomID, err := strconv.ParseUint(roomIDStr, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid room ID",
-		})
+		return utils.RespondBadRequest(c, "Invalid room ID")
 	}
 
 	// Validate room exists
 	var room models.Room
 	if err := config.DB.First(&room, roomID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Room not found",
-		})
+		return utils.RespondNotFound(c, "Room not found")
+	}
+
+	// Verify requester is a room participant (for direct messages and group rooms)
+	if err := utils.VerifyRoomMembership(config.DB, userID, uint(roomID)); err != nil {
+		return utils.RespondForbidden(c, err.Error())
 	}
 
 	// Get pagination parameters
@@ -112,6 +116,7 @@ func GetMessages(c *fiber.Ctx) error {
 	}
 	offset := (page - 1) * limit
 
+	// Fetch messages - GORM automatically excludes soft-deleted messages
 	var messages []models.Message
 	if err := config.DB.
 		Preload("User").
@@ -121,12 +126,10 @@ func GetMessages(c *fiber.Ctx) error {
 		Limit(limit).
 		Offset(offset).
 		Find(&messages).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to fetch messages",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "GetMessages - fetch messages")
 	}
 
-	// Count total messages for pagination
+	// Count total messages for pagination (excluding soft-deleted)
 	var total int64
 	config.DB.Model(&models.Message{}).Where("room_id = ?", roomID).Count(&total)
 
@@ -145,9 +148,7 @@ func GetMessages(c *fiber.Ctx) error {
 func GetRooms(c *fiber.Ctx) error {
 	var rooms []models.Room
 	if err := config.DB.Find(&rooms).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to fetch rooms",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "GetRooms - fetch rooms")
 	}
 
 	return c.JSON(fiber.Map{
@@ -160,18 +161,14 @@ func UpdateMessage(c *fiber.Ctx) error {
 	// Get user ID from JWT middleware (type-safe)
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{
-			"error": "User not authenticated",
-		})
+		return utils.RespondUnauthorized(c, "User not authenticated")
 	}
 
 	// Get message ID from URL params
 	messageIDStr := c.Params("id")
 	messageID, err := strconv.ParseUint(messageIDStr, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid message ID",
-		})
+		return utils.RespondBadRequest(c, "Invalid message ID")
 	}
 
 	type UpdateRequest struct {
@@ -180,39 +177,29 @@ func UpdateMessage(c *fiber.Ctx) error {
 
 	var req UpdateRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+		return utils.RespondBadRequest(c, "Invalid request body")
 	}
 
 	// Fetch the message
 	var message models.Message
 	if err := config.DB.First(&message, messageID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Message not found",
-		})
+		return utils.RespondNotFound(c, "Message not found")
 	}
 
 	// Check if user owns the message
 	if message.UserID != userID {
-		return c.Status(403).JSON(fiber.Map{
-			"error": "You can only edit your own messages",
-		})
+		return utils.RespondForbidden(c, "You can only edit your own messages")
 	}
 
 	// Update the message content
 	message.Content = req.Content
 	if err := config.DB.Save(&message).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to update message",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "UpdateMessage - save message")
 	}
 
 	// Reload with user data and parent message for response
 	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to load message data",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "UpdateMessage - load message data")
 	}
 
 	return c.JSON(fiber.Map{
@@ -226,40 +213,30 @@ func DeleteMessage(c *fiber.Ctx) error {
 	// Get user ID from JWT middleware (type-safe)
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{
-			"error": "User not authenticated",
-		})
+		return utils.RespondUnauthorized(c, "User not authenticated")
 	}
 
 	// Get message ID from URL params
 	messageIDStr := c.Params("id")
 	messageID, err := strconv.ParseUint(messageIDStr, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid message ID",
-		})
+		return utils.RespondBadRequest(c, "Invalid message ID")
 	}
 
 	// Fetch the message
 	var message models.Message
 	if err := config.DB.First(&message, messageID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Message not found",
-		})
+		return utils.RespondNotFound(c, "Message not found")
 	}
 
 	// Check if user owns the message
 	if message.UserID != userID {
-		return c.Status(403).JSON(fiber.Map{
-			"error": "You can only delete your own messages",
-		})
+		return utils.RespondForbidden(c, "You can only delete your own messages")
 	}
 
 	// Soft delete the message
 	if err := config.DB.Delete(&message).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to delete message",
-		})
+		return utils.RespondInternalErrorWithLog(c, err, "DeleteMessage - delete message")
 	}
 
 	return c.JSON(fiber.Map{

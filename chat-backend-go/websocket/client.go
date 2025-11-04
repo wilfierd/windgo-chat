@@ -22,6 +22,17 @@ const (
 
 	// Maximum message size allowed from peer
 	maxMessageSize = 8192
+
+	// Message type constants
+	MessageTypeJoin    = "join"
+	MessageTypeLeave   = "leave"
+	MessageTypeTyping  = "typing"
+	MessageTypeMessage = "message"
+	MessageTypePing    = "ping"
+	MessageTypePong    = "pong"
+	MessageTypeJoined  = "joined"
+	MessageTypeLeft    = "left"
+	MessageTypeError   = "error"
 )
 
 // ReadPump pumps messages from the WebSocket connection to the hub
@@ -108,46 +119,54 @@ func (c *Client) handleMessage(msg *Message) {
 	msg.UserID = c.UserID
 
 	switch msg.Type {
-	case "join":
+	case MessageTypeJoin:
 		// Client wants to join a room
 		if roomID, ok := msg.Content.(float64); ok {
-			c.Hub.JoinRoom(c, uint(roomID))
-			c.sendAck("joined", msg.RoomID)
-			log.Printf("Client %s joined room %d", c.ID, uint(roomID))
+			if c.Hub.JoinRoom(c, uint(roomID)) {
+				c.sendAck(MessageTypeJoined, msg.RoomID)
+				log.Printf("Client %s joined room %d", c.ID, uint(roomID))
+			} else {
+				c.sendError("join_failed", msg.RoomID, "Not a member of this room")
+				log.Printf("Client %s denied access to room %d", c.ID, uint(roomID))
+			}
 		} else if roomMap, ok := msg.Content.(map[string]interface{}); ok {
 			if roomID, ok := roomMap["room_id"].(float64); ok {
-				c.Hub.JoinRoom(c, uint(roomID))
-				c.sendAck("joined", uint(roomID))
-				log.Printf("Client %s joined room %d", c.ID, uint(roomID))
+				if c.Hub.JoinRoom(c, uint(roomID)) {
+					c.sendAck(MessageTypeJoined, uint(roomID))
+					log.Printf("Client %s joined room %d", c.ID, uint(roomID))
+				} else {
+					c.sendError("join_failed", uint(roomID), "Not a member of this room")
+					log.Printf("Client %s denied access to room %d", c.ID, uint(roomID))
+				}
 			}
 		}
 
-	case "leave":
+	case MessageTypeLeave:
 		// Client wants to leave a room
 		if roomID, ok := msg.Content.(float64); ok {
 			c.Hub.LeaveRoom(c, uint(roomID))
-			c.sendAck("left", msg.RoomID)
+			c.sendAck(MessageTypeLeft, msg.RoomID)
 			log.Printf("Client %s left room %d", c.ID, uint(roomID))
 		} else if roomMap, ok := msg.Content.(map[string]interface{}); ok {
 			if roomID, ok := roomMap["room_id"].(float64); ok {
 				c.Hub.LeaveRoom(c, uint(roomID))
-				c.sendAck("left", uint(roomID))
+				c.sendAck(MessageTypeLeft, uint(roomID))
 				log.Printf("Client %s left room %d", c.ID, uint(roomID))
 			}
 		}
 
-	case "typing":
+	case MessageTypeTyping:
 		// Client is typing in a room
 		c.Hub.BroadcastToRoom(&Message{
-			Type:    "typing",
+			Type:    MessageTypeTyping,
 			RoomID:  msg.RoomID,
 			UserID:  c.UserID,
 			Content: msg.Content,
 		})
 
-	case "ping":
+	case MessageTypePing:
 		// Heartbeat ping from client
-		c.sendAck("pong", 0)
+		c.sendAck(MessageTypePong, 0)
 
 	default:
 		log.Printf("Unknown message type from client %s: %s", c.ID, msg.Type)
@@ -173,6 +192,31 @@ func (c *Client) sendAck(ackType string, roomID uint) {
 	case c.Send <- data:
 	default:
 		log.Printf("Client %s send buffer full, dropping ack", c.ID)
+	}
+}
+
+// sendError sends an error message to the client
+func (c *Client) sendError(errorType string, roomID uint, message string) {
+	errMsg := Message{
+		Type:   errorType,
+		RoomID: roomID,
+		UserID: c.UserID,
+		Content: map[string]interface{}{
+			"status":  "error",
+			"message": message,
+		},
+	}
+
+	data, err := json.Marshal(errMsg)
+	if err != nil {
+		log.Printf("Error marshaling error message: %v", err)
+		return
+	}
+
+	select {
+	case c.Send <- data:
+	default:
+		log.Printf("Client %s send buffer full, dropping error", c.ID)
 	}
 }
 

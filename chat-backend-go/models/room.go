@@ -15,11 +15,20 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	// RoomTypeGroup represents a group chat room
+	RoomTypeGroup = "group"
+	// RoomTypeDirect represents a direct message room between two users
+	RoomTypeDirect = "direct"
+)
+
 type Room struct {
 	ID          uint           `json:"id" gorm:"primaryKey"`
 	Name        string         `json:"name" gorm:"not null;index:idx_room_name"`
+	Type        string         `json:"type" gorm:"not null;default:'group';index:idx_room_type"`
 	DisplayName string         `json:"display_name" gorm:"-"` // Computed field: "Name (#ID)"
 	Messages    []Message      `json:"messages,omitempty"`
+	Members     []User         `json:"members,omitempty" gorm:"many2many:room_memberships;"`
 	CreatedAt   time.Time      `json:"created_at" gorm:"index:idx_room_created"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`

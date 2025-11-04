@@ -28,8 +28,8 @@ func main() {
 	utils.SeedDemoRooms()
 	utils.Logger.Info("Demo data seeded")
 
-	// Initialize WebSocket hub
-	handlers.InitWebSocketHub()
+	// Initialize WebSocket hub with database connection
+	handlers.InitWebSocketHub(config.GetDB())
 	utils.Logger.Info("WebSocket hub initialized")
 
 	// Create Fiber app with custom error handler

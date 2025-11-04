@@ -78,7 +78,7 @@ func ConnectDB() {
 	log.Printf("Connection pool configured: MaxIdle=%d, MaxOpen=%d", 10, 100)
 
 	// Auto migrate models
-	err = DB.AutoMigrate(&models.User{}, &models.Room{}, &models.Message{})
+	err = DB.AutoMigrate(&models.User{}, &models.Room{}, &models.RoomMembership{}, &models.Message{})
 	if err != nil {
 		log.Fatal("Failed to migrate database:", err)
 	}

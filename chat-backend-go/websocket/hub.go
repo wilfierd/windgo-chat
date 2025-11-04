@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/gofiber/websocket/v2"
+	"gorm.io/gorm"
 )
 
 // Client represents a connected WebSocket client
@@ -46,18 +47,26 @@ type Hub struct {
 	// Unregister requests from clients
 	unregister chan *Client
 
+	// Database connection for membership verification
+	db *gorm.DB
+
+	// Cache of room memberships: roomID -> set of userIDs
+	membershipCache map[uint]map[uint]bool
+
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
 }
 
 // NewHub creates a new Hub instance
-func NewHub() *Hub {
+func NewHub(db *gorm.DB) *Hub {
 	return &Hub{
-		clients:    make(map[string]*Client),
-		rooms:      make(map[uint]map[string]*Client),
-		broadcast:  make(chan *Message, 256),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
+		clients:         make(map[string]*Client),
+		rooms:           make(map[uint]map[string]*Client),
+		broadcast:       make(chan *Message, 256),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		db:              db,
+		membershipCache: make(map[uint]map[uint]bool),
 	}
 }
 
@@ -122,12 +131,20 @@ func (h *Hub) unregisterClient(client *Client) {
 }
 
 // broadcastMessage sends a message to all clients in a specific room
+// Only broadcasts to clients who are verified room members
 func (h *Hub) broadcastMessage(message *Message) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	roomClients, exists := h.rooms[message.RoomID]
 	if !exists {
+		return
+	}
+
+	// Get room members from cache or database
+	members := h.getRoomMembers(message.RoomID)
+	if len(members) == 0 {
+		log.Printf("No members found for room %d, skipping broadcast", message.RoomID)
 		return
 	}
 
@@ -138,8 +155,14 @@ func (h *Hub) broadcastMessage(message *Message) {
 		return
 	}
 
-	// Send to all clients in the room
+	// Send only to clients who are room members
 	for _, client := range roomClients {
+		// Verify client is a room member
+		if !members[client.UserID] {
+			log.Printf("Client %s (User %d) is not a member of room %d, skipping", client.ID, client.UserID, message.RoomID)
+			continue
+		}
+
 		select {
 		case client.Send <- data:
 		default:
@@ -152,8 +175,14 @@ func (h *Hub) broadcastMessage(message *Message) {
 	}
 }
 
-// JoinRoom adds a client to a room
-func (h *Hub) JoinRoom(client *Client, roomID uint) {
+// JoinRoom adds a client to a room after verifying membership
+func (h *Hub) JoinRoom(client *Client, roomID uint) bool {
+	// Verify user is a member of the room
+	if !h.isRoomMember(client.UserID, roomID) {
+		log.Printf("Client %s (User %d) denied access to room %d: not a member", client.ID, client.UserID, roomID)
+		return false
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -169,6 +198,7 @@ func (h *Hub) JoinRoom(client *Client, roomID uint) {
 	h.rooms[roomID][client.ID] = client
 
 	log.Printf("Client %s joined room %d", client.ID, roomID)
+	return true
 }
 
 // LeaveRoom removes a client from a room
@@ -223,4 +253,101 @@ func (h *Hub) GetOnlineUsers() []uint {
 		result = append(result, userID)
 	}
 	return result
+}
+
+// isRoomMember checks if a user is a member of a room
+func (h *Hub) isRoomMember(userID uint, roomID uint) bool {
+	// Check cache first
+	h.mu.RLock()
+	if members, exists := h.membershipCache[roomID]; exists {
+		isMember := members[userID]
+		h.mu.RUnlock()
+		return isMember
+	}
+	h.mu.RUnlock()
+
+	// Query database if not in cache
+	if h.db == nil {
+		log.Printf("Database not available for membership check")
+		return false
+	}
+
+	var count int64
+	err := h.db.Table("room_memberships").
+		Where("user_id = ? AND room_id = ?", userID, roomID).
+		Count(&count).Error
+
+	if err != nil {
+		log.Printf("Error checking room membership: %v", err)
+		return false
+	}
+
+	isMember := count > 0
+
+	// Update cache
+	h.mu.Lock()
+	if _, exists := h.membershipCache[roomID]; !exists {
+		h.membershipCache[roomID] = make(map[uint]bool)
+	}
+	h.membershipCache[roomID][userID] = isMember
+	h.mu.Unlock()
+
+	return isMember
+}
+
+// getRoomMembers returns all member user IDs for a room
+func (h *Hub) getRoomMembers(roomID uint) map[uint]bool {
+	// Check cache first
+	h.mu.RLock()
+	if members, exists := h.membershipCache[roomID]; exists {
+		h.mu.RUnlock()
+		return members
+	}
+	h.mu.RUnlock()
+
+	// Query database if not in cache
+	if h.db == nil {
+		log.Printf("Database not available for getting room members")
+		return make(map[uint]bool)
+	}
+
+	var userIDs []uint
+	err := h.db.Table("room_memberships").
+		Where("room_id = ?", roomID).
+		Pluck("user_id", &userIDs).Error
+
+	if err != nil {
+		log.Printf("Error getting room members: %v", err)
+		return make(map[uint]bool)
+	}
+
+	// Build member set
+	members := make(map[uint]bool)
+	for _, userID := range userIDs {
+		members[userID] = true
+	}
+
+	// Update cache
+	h.mu.Lock()
+	h.membershipCache[roomID] = members
+	h.mu.Unlock()
+
+	return members
+}
+
+// InvalidateMembershipCache clears the membership cache for a room
+// Should be called when room memberships change
+func (h *Hub) InvalidateMembershipCache(roomID uint) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.membershipCache, roomID)
+	log.Printf("Membership cache invalidated for room %d", roomID)
+}
+
+// InvalidateAllMembershipCache clears the entire membership cache
+func (h *Hub) InvalidateAllMembershipCache() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.membershipCache = make(map[uint]map[uint]bool)
+	log.Printf("All membership cache invalidated")
 }

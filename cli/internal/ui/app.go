@@ -36,6 +36,7 @@ const (
 	stateCreateRoom
 	stateEditRoom
 	stateConfirmDeleteRoom
+	stateNewDMDialog
 )
 
 type lobbyView int
@@ -43,7 +44,10 @@ type lobbyView int
 const (
 	lobbyViewRooms lobbyView = iota
 	lobbyViewPeople
+	lobbyViewDirectMessages
 )
+
+// Tab order: Group Rooms -> People -> Direct Messages -> Group Rooms (cycles)
 
 var (
 	// Clean, minimalist color scheme - like Claude's interface
@@ -139,6 +143,10 @@ type Model struct {
 	filteredUsers []api.User
 	userIndex     int
 
+	directRooms         []api.DirectRoom
+	filteredDirectRooms []api.DirectRoom
+	dmIndex             int
+
 	currentView  lobbyView
 	searchInput  textinput.Model
 	searchActive bool
@@ -179,6 +187,12 @@ type Model struct {
 	roomNameInput    textinput.Model // Text input for room name (create/edit)
 	selectedRoomID   uint            // Room ID being edited/deleted
 	selectedRoomName string          // Room name being edited/deleted
+
+	// New DM dialog
+	availableUsers         []api.AvailableUser // Users available for starting DMs
+	filteredAvailableUsers []api.AvailableUser // Filtered users based on search
+	availableUserIndex     int                 // Currently selected user in new DM dialog
+	dmSearchInput          textinput.Model     // Search input for new DM dialog
 }
 
 // min returns the minimum of two integers
@@ -247,6 +261,11 @@ func NewModel(client *api.Client) Model {
 	threadInput.CharLimit = 1000
 	threadInput.Width = 80
 
+	dmSearchInput := textinput.New()
+	dmSearchInput.Placeholder = "Search users..."
+	dmSearchInput.CharLimit = 50
+	dmSearchInput.Width = 30
+
 	return Model{
 		client:               client,
 		state:                stateLoading,
@@ -257,10 +276,12 @@ func NewModel(client *api.Client) Model {
 		editInput:            editInput,
 		roomNameInput:        roomNameInput,
 		threadInput:          threadInput,
+		dmSearchInput:        dmSearchInput,
 		currentView:          lobbyViewRooms,
 		selectedMessageIndex: -1,
 		threadMessageIndex:   -1,
 		adminRoomIndex:       -1,
+		availableUserIndex:   0,
 	}
 }
 
@@ -300,6 +321,11 @@ type roomsLoadedMsg struct {
 type usersLoadedMsg struct {
 	users []api.User
 	err   error
+}
+
+type directRoomsLoadedMsg struct {
+	directRooms []api.DirectRoom
+	err         error
 }
 
 type messagesLoadedMsg struct {
@@ -357,6 +383,16 @@ type roomDeletedMsg struct {
 }
 
 type userPollTickMsg time.Time
+
+type availableUsersLoadedMsg struct {
+	users []api.AvailableUser
+	err   error
+}
+
+type directRoomCreatedMsg struct {
+	directRoom *api.DirectRoom
+	err        error
+}
 
 func (m Model) Init() tea.Cmd {
 	return loadStoredCredentials()
@@ -455,6 +491,16 @@ func loadUsersCmd(client *api.Client, token string) tea.Cmd {
 			return usersLoadedMsg{err: err}
 		}
 		return usersLoadedMsg{users: users}
+	}
+}
+
+func loadDirectRoomsCmd(client *api.Client, token string) tea.Cmd {
+	return func() tea.Msg {
+		directRooms, err := client.GetDirectRooms(token)
+		if err != nil {
+			return directRoomsLoadedMsg{err: err}
+		}
+		return directRoomsLoadedMsg{directRooms: directRooms}
 	}
 }
 
@@ -576,7 +622,27 @@ func pollUsersCmd() tea.Cmd {
 	})
 }
 
-// applyFilters filters rooms and users based on search input
+func loadAvailableUsersCmd(client *api.Client, token string) tea.Cmd {
+	return func() tea.Msg {
+		users, err := client.GetAvailableUsers(token)
+		if err != nil {
+			return availableUsersLoadedMsg{err: err}
+		}
+		return availableUsersLoadedMsg{users: users}
+	}
+}
+
+func createDirectRoomCmd(client *api.Client, token string, targetUserID uint) tea.Cmd {
+	return func() tea.Msg {
+		directRoom, err := client.CreateDirectRoom(token, targetUserID)
+		if err != nil {
+			return directRoomCreatedMsg{err: err}
+		}
+		return directRoomCreatedMsg{directRoom: directRoom}
+	}
+}
+
+// applyFilters filters rooms, users, and direct rooms based on search input
 func (m *Model) applyFilters() {
 	query := strings.ToLower(m.searchInput.Value())
 
@@ -607,12 +673,51 @@ func (m *Model) applyFilters() {
 		m.filteredUsers = filtered
 	}
 
+	// Filter direct rooms
+	if query == "" {
+		m.filteredDirectRooms = m.directRooms
+	} else {
+		filtered := []api.DirectRoom{}
+		for _, dm := range m.directRooms {
+			if strings.Contains(strings.ToLower(dm.OtherUser.Username), query) ||
+				(dm.LastMessage != nil && strings.Contains(strings.ToLower(dm.LastMessage.Content), query)) {
+				filtered = append(filtered, dm)
+			}
+		}
+		m.filteredDirectRooms = filtered
+	}
+
 	// Reset indices if out of bounds
 	if m.roomIndex >= len(m.filteredRooms) {
 		m.roomIndex = 0
 	}
 	if m.userIndex >= len(m.filteredUsers) {
 		m.userIndex = 0
+	}
+	if m.dmIndex >= len(m.filteredDirectRooms) {
+		m.dmIndex = 0
+	}
+}
+
+// applyDMSearchFilter filters available users based on DM search input
+func (m *Model) applyDMSearchFilter() {
+	query := strings.ToLower(m.dmSearchInput.Value())
+
+	if query == "" {
+		m.filteredAvailableUsers = m.availableUsers
+	} else {
+		filtered := []api.AvailableUser{}
+		for _, user := range m.availableUsers {
+			if strings.Contains(strings.ToLower(user.Username), query) {
+				filtered = append(filtered, user)
+			}
+		}
+		m.filteredAvailableUsers = filtered
+	}
+
+	// Reset index if out of bounds
+	if m.availableUserIndex >= len(m.filteredAvailableUsers) {
+		m.availableUserIndex = 0
 	}
 }
 
@@ -766,10 +871,53 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.userIndex = 0
 		}
 
+		// Update currentDMUser status if we're in a DM conversation
+		if m.currentDMUser != nil {
+			for _, user := range msg.users {
+				if user.ID == m.currentDMUser.ID {
+					m.currentDMUser.IsOnline = user.IsOnline
+					m.currentDMUser.LastActiveAt = user.LastActiveAt
+					break
+				}
+			}
+		}
+
 		// Only update status message if we're entering the lobby for the first time
 		if m.state != stateChatLobby {
 			m.status = fmt.Sprintf("Found %d rooms, %d users. Press / to search, Tab to switch views.", len(m.rooms), len(m.users))
 		}
+		return m, nil
+
+	case directRoomsLoadedMsg:
+		if msg.err != nil {
+			// Non-critical error, DM list is optional
+			return m, nil
+		}
+
+		// Store current selected DM if any
+		var currentSelectedDMID uint
+		if len(m.filteredDirectRooms) > 0 && m.dmIndex < len(m.filteredDirectRooms) {
+			currentSelectedDMID = m.filteredDirectRooms[m.dmIndex].ID
+		}
+
+		m.directRooms = msg.directRooms
+		m.applyFilters()
+
+		// Try to restore selection to the same DM
+		if currentSelectedDMID > 0 {
+			for i, dm := range m.filteredDirectRooms {
+				if dm.ID == currentSelectedDMID {
+					m.dmIndex = i
+					break
+				}
+			}
+		}
+
+		// Ensure index is in bounds
+		if m.dmIndex >= len(m.filteredDirectRooms) {
+			m.dmIndex = 0
+		}
+
 		return m, nil
 
 	case messagesLoadedMsg:
@@ -1088,6 +1236,46 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateAdminRooms
 		return m, loadRoomsCmd(m.client, m.token)
 
+	case availableUsersLoadedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to load users: %v", msg.err))
+			m.state = stateChatLobby
+			return m, nil
+		}
+		m.availableUsers = msg.users
+		m.applyDMSearchFilter()
+		m.availableUserIndex = 0
+		return m, nil
+
+	case directRoomCreatedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render(fmt.Sprintf("Failed to create DM: %v", msg.err))
+			return m, nil
+		}
+		// Convert DirectRoom to Room for conversation view
+		dmRoom := api.Room{
+			ID:        msg.directRoom.ID,
+			Name:      msg.directRoom.Name,
+			Type:      msg.directRoom.Type,
+			CreatedAt: msg.directRoom.CreatedAt,
+			UpdatedAt: msg.directRoom.UpdatedAt,
+		}
+		m.currentRoom = &dmRoom
+		m.currentDMUser = &msg.directRoom.OtherUser
+		m.state = stateConversation
+		m.status = fmt.Sprintf("Opening DM with: %s", msg.directRoom.OtherUser.Username)
+		m.messages = nil
+		m.messageInput.SetValue("")
+		m.messageInput.Focus()
+		m.currentPage = 1
+		m.hasMoreMessages = true
+		// Refresh DM list and load messages
+		return m, tea.Batch(
+			loadMessagesCmd(m.client, m.token, msg.directRoom.ID),
+			joinRoomCmd(m.wsClient, msg.directRoom.ID),
+			loadDirectRoomsCmd(m.client, m.token),
+		)
+
 	case tea.WindowSizeMsg:
 		if !m.viewportReady {
 			m.viewport = viewport.New(msg.Width, msg.Height-10)
@@ -1210,6 +1398,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			}
+		}
+		// Handle DM search input in new DM dialog
+		if m.state == stateNewDMDialog {
+			skipDMSearch := false
+			switch keyMsg.String() {
+			case "esc", "enter", "up", "down", "k", "j":
+				skipDMSearch = true
+			}
+			if !skipDMSearch {
+				var cmd tea.Cmd
+				m.dmSearchInput, cmd = m.dmSearchInput.Update(message)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.applyDMSearchFilter()
 			}
 		}
 		var keyCmd tea.Cmd
@@ -1367,6 +1571,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 					return m, tea.Batch(
 						loadRoomsCmd(m.client, m.token),
 						loadUsersCmd(m.client, m.token),
+						loadDirectRoomsCmd(m.client, m.token),
 					)
 				case 1: // My Profile
 					m.status = "Profile view coming soon..."
@@ -1403,6 +1608,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 					return m, tea.Batch(
 						loadRoomsCmd(m.client, m.token),
 						loadUsersCmd(m.client, m.token),
+						loadDirectRoomsCmd(m.client, m.token),
 					)
 				case 1: // My Profile
 					m.status = "Profile view coming soon..."
@@ -1447,53 +1653,108 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			case "/":
 				m.searchActive = true
 				m.searchInput.Focus()
+			case "n":
+				// Open new DM dialog only when in Direct Messages tab
+				if m.currentView == lobbyViewDirectMessages {
+					m.state = stateNewDMDialog
+					m.status = "Loading available users..."
+					m.dmSearchInput.SetValue("")
+					m.dmSearchInput.Focus()
+					m.availableUserIndex = 0
+					return m, loadAvailableUsersCmd(m.client, m.token)
+				}
 			case "tab":
-				if m.currentView == lobbyViewRooms {
+				// Cycle through: Rooms -> People -> Direct Messages -> Rooms
+				switch m.currentView {
+				case lobbyViewRooms:
 					m.currentView = lobbyViewPeople
-				} else {
+				case lobbyViewPeople:
+					m.currentView = lobbyViewDirectMessages
+				case lobbyViewDirectMessages:
 					m.currentView = lobbyViewRooms
 				}
 			case "up", "k":
-				if m.currentView == lobbyViewRooms {
+				switch m.currentView {
+				case lobbyViewRooms:
 					if m.roomIndex > 0 {
 						m.roomIndex--
 					}
-				} else {
+				case lobbyViewPeople:
 					if m.userIndex > 0 {
 						m.userIndex--
 					}
+				case lobbyViewDirectMessages:
+					if m.dmIndex > 0 {
+						m.dmIndex--
+					}
 				}
 			case "down", "j":
-				if m.currentView == lobbyViewRooms {
+				switch m.currentView {
+				case lobbyViewRooms:
 					if m.roomIndex < len(m.filteredRooms)-1 {
 						m.roomIndex++
 					}
-				} else {
+				case lobbyViewPeople:
 					if m.userIndex < len(m.filteredUsers)-1 {
 						m.userIndex++
 					}
+				case lobbyViewDirectMessages:
+					if m.dmIndex < len(m.filteredDirectRooms)-1 {
+						m.dmIndex++
+					}
 				}
 			case "enter":
-				if m.currentView == lobbyViewRooms && len(m.filteredRooms) > 0 {
-					selectedRoom := m.filteredRooms[m.roomIndex]
-					m.currentRoom = &selectedRoom
-					m.currentDMUser = nil
-					m.state = stateConversation
-					m.status = fmt.Sprintf("Loading room: %s", selectedRoom.Name)
-					m.messages = nil
-					m.messageInput.SetValue("")
-					m.messageInput.Focus()
-					m.currentPage = 1
-					m.hasMoreMessages = true
-					// Load initial messages via REST and join room via WebSocket
-					return m, tea.Batch(
-						loadMessagesCmd(m.client, m.token, selectedRoom.ID),
-						joinRoomCmd(m.wsClient, selectedRoom.ID),
-					)
-				} else if m.currentView == lobbyViewPeople && len(m.filteredUsers) > 0 {
-					selectedUser := m.filteredUsers[m.userIndex]
-					m.status = fmt.Sprintf("Starting DM with: %s (DM not yet implemented)", selectedUser.Username)
-					// TODO: Implement DM functionality - needs backend support
+				switch m.currentView {
+				case lobbyViewRooms:
+					if len(m.filteredRooms) > 0 {
+						selectedRoom := m.filteredRooms[m.roomIndex]
+						m.currentRoom = &selectedRoom
+						m.currentDMUser = nil
+						m.state = stateConversation
+						m.status = fmt.Sprintf("Loading room: %s", selectedRoom.Name)
+						m.messages = nil
+						m.messageInput.SetValue("")
+						m.messageInput.Focus()
+						m.currentPage = 1
+						m.hasMoreMessages = true
+						// Load initial messages via REST and join room via WebSocket
+						return m, tea.Batch(
+							loadMessagesCmd(m.client, m.token, selectedRoom.ID),
+							joinRoomCmd(m.wsClient, selectedRoom.ID),
+						)
+					}
+				case lobbyViewPeople:
+					if len(m.filteredUsers) > 0 {
+						selectedUser := m.filteredUsers[m.userIndex]
+						m.status = fmt.Sprintf("Starting DM with: %s (DM not yet implemented)", selectedUser.Username)
+						// TODO: Implement DM functionality - needs backend support
+					}
+				case lobbyViewDirectMessages:
+					if len(m.filteredDirectRooms) > 0 {
+						selectedDM := m.filteredDirectRooms[m.dmIndex]
+						// Convert DirectRoom to Room for conversation view
+						dmRoom := api.Room{
+							ID:        selectedDM.ID,
+							Name:      selectedDM.Name,
+							Type:      selectedDM.Type,
+							CreatedAt: selectedDM.CreatedAt,
+							UpdatedAt: selectedDM.UpdatedAt,
+						}
+						m.currentRoom = &dmRoom
+						m.currentDMUser = &selectedDM.OtherUser
+						m.state = stateConversation
+						m.status = fmt.Sprintf("Loading DM with: %s", selectedDM.OtherUser.Username)
+						m.messages = nil
+						m.messageInput.SetValue("")
+						m.messageInput.Focus()
+						m.currentPage = 1
+						m.hasMoreMessages = true
+						// Load initial messages via REST and join room via WebSocket
+						return m, tea.Batch(
+							loadMessagesCmd(m.client, m.token, selectedDM.ID),
+							joinRoomCmd(m.wsClient, selectedDM.ID),
+						)
+					}
 				}
 			case "q":
 				return m, tea.Quit
@@ -1933,6 +2194,35 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.messageInput.Focus()
 			m.status = ""
 		}
+
+	case stateNewDMDialog:
+		switch msg.String() {
+		case "up", "k":
+			if m.availableUserIndex > 0 {
+				m.availableUserIndex--
+			}
+		case "down", "j":
+			if m.availableUserIndex < len(m.filteredAvailableUsers)-1 {
+				m.availableUserIndex++
+			}
+		case "enter":
+			// Create or open DM with selected user
+			if len(m.filteredAvailableUsers) > 0 && m.availableUserIndex < len(m.filteredAvailableUsers) {
+				selectedUser := m.filteredAvailableUsers[m.availableUserIndex]
+				m.status = fmt.Sprintf("Creating DM with %s...", selectedUser.Username)
+				m.dmSearchInput.Blur()
+				return m, createDirectRoomCmd(m.client, m.token, selectedUser.ID)
+			}
+		case "esc":
+			// Cancel and return to lobby
+			m.state = stateChatLobby
+			m.dmSearchInput.SetValue("")
+			m.dmSearchInput.Blur()
+			m.status = ""
+			m.availableUsers = nil
+			m.filteredAvailableUsers = nil
+			m.availableUserIndex = 0
+		}
 	}
 
 	return m, nil
@@ -1969,6 +2259,7 @@ func (m *Model) handleCommand(cmd string) {
 }
 
 func (m *Model) updateMessageViewport() {
+	// Can update viewport for both group rooms and DMs
 	if m.currentRoom == nil {
 		return
 	}
@@ -2126,18 +2417,30 @@ func (m Model) View() string {
 		b.WriteString(statusStyle.Render("- " + m.user.Username))
 		b.WriteString("\n\n")
 
-		// Tab selector - clean style
+		// Tab selector - clean style with three tabs
+		// Group Rooms tab
 		if m.currentView == lobbyViewRooms {
-			b.WriteString(selectedItem.Render("Rooms"))
-			b.WriteString("  ")
-			b.WriteString(statusStyle.Render("People"))
-			b.WriteString("\n\n")
+			b.WriteString(selectedItem.Render("Group Rooms"))
 		} else {
-			b.WriteString(statusStyle.Render("Rooms"))
-			b.WriteString("  ")
-			b.WriteString(selectedItem.Render("People"))
-			b.WriteString("\n\n")
+			b.WriteString(statusStyle.Render("Group Rooms"))
 		}
+		b.WriteString("  ")
+		
+		// Direct Messages tab
+		if m.currentView == lobbyViewDirectMessages {
+			b.WriteString(selectedItem.Render("Direct Messages"))
+		} else {
+			b.WriteString(statusStyle.Render("Direct Messages"))
+		}
+		b.WriteString("  ")
+		
+		// People tab
+		if m.currentView == lobbyViewPeople {
+			b.WriteString(selectedItem.Render("People"))
+		} else {
+			b.WriteString(statusStyle.Render("People"))
+		}
+		b.WriteString("\n\n")
 
 		// Search bar
 		if m.searchActive {
@@ -2147,7 +2450,8 @@ func (m Model) View() string {
 		}
 
 		// Display current view
-		if m.currentView == lobbyViewRooms {
+		switch m.currentView {
+		case lobbyViewRooms:
 			if len(m.filteredRooms) == 0 {
 				if m.searchInput.Value() != "" {
 					b.WriteString("No rooms match your search.")
@@ -2189,7 +2493,109 @@ func (m Model) View() string {
 					b.WriteString("  ↓ More items below\n")
 				}
 			}
-		} else {
+		
+		case lobbyViewDirectMessages:
+			// Direct Messages view
+			if len(m.filteredDirectRooms) == 0 {
+				if m.searchInput.Value() != "" {
+					b.WriteString("No direct messages match your search.")
+				} else {
+					b.WriteString("No direct messages yet.")
+					b.WriteString("\n\n")
+					b.WriteString(helpStyle.Render("Start a conversation from the People tab!"))
+				}
+			} else {
+				b.WriteString(fmt.Sprintf("Direct Messages (%d):\n\n", len(m.filteredDirectRooms)))
+				
+				// Show max 15 items for scrolling simulation
+				startIdx := 0
+				endIdx := len(m.filteredDirectRooms)
+				if endIdx > 15 {
+					// Simple viewport: show items around selection
+					if m.dmIndex > 7 {
+						startIdx = m.dmIndex - 7
+					}
+					endIdx = startIdx + 15
+					if endIdx > len(m.filteredDirectRooms) {
+						endIdx = len(m.filteredDirectRooms)
+						startIdx = endIdx - 15
+						if startIdx < 0 {
+							startIdx = 0
+						}
+					}
+				}
+				if startIdx > 0 {
+					b.WriteString("  ↑ More items above\n")
+				}
+				for i := startIdx; i < endIdx; i++ {
+					dm := m.filteredDirectRooms[i]
+					
+					// Status indicator
+					var statusIcon string
+					if dm.OtherUser.IsOnline {
+						statusIcon = onlineStyle.Render("●") // Filled dot
+					} else {
+						statusIcon = offlineStyle.Render("○") // Empty circle
+					}
+					
+					// Format last message preview
+					var lastMsgPreview string
+					if dm.LastMessage != nil {
+						// Truncate message content to fit
+						maxLen := 40
+						content := dm.LastMessage.Content
+						if len(content) > maxLen {
+							content = content[:maxLen] + "..."
+						}
+						lastMsgPreview = helpStyle.Render(content)
+					} else {
+						lastMsgPreview = helpStyle.Render("No messages yet")
+					}
+					
+					// Format timestamp
+					var timestamp string
+					if dm.LastMessage != nil {
+						duration := time.Since(dm.LastMessage.CreatedAt)
+						if duration < time.Minute {
+							timestamp = "just now"
+						} else if duration < time.Hour {
+							timestamp = fmt.Sprintf("%dm", int(duration.Minutes()))
+						} else if duration < 24*time.Hour {
+							timestamp = fmt.Sprintf("%dh", int(duration.Hours()))
+						} else if duration < 7*24*time.Hour {
+							timestamp = fmt.Sprintf("%dd", int(duration.Hours()/24))
+						} else {
+							timestamp = dm.LastMessage.CreatedAt.Format("Jan 2")
+						}
+					}
+					
+					// Build the DM line
+					dmLine := fmt.Sprintf("%s %s", statusIcon, dm.OtherUser.Username)
+					
+					// Add unread badge if there are unread messages
+					if dm.UnreadCount > 0 {
+						dmLine += " " + errorStyle.Render(fmt.Sprintf("(%d)", dm.UnreadCount))
+					}
+					
+					dmLine += "\n    " + lastMsgPreview
+					
+					if timestamp != "" {
+						dmLine += " " + helpStyle.Render("· "+timestamp)
+					}
+					
+					if i == m.dmIndex {
+						b.WriteString(selectedItem.Render("> " + dmLine))
+					} else {
+						b.WriteString("  " + dmLine)
+					}
+					b.WriteString("\n")
+				}
+				if endIdx < len(m.filteredDirectRooms) {
+					b.WriteString("  ↓ More items below\n")
+				}
+			}
+		
+		case lobbyViewPeople:
 			// People view
 			if len(m.filteredUsers) == 0 {
 				if m.searchInput.Value() != "" {
@@ -2276,16 +2682,30 @@ func (m Model) View() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("Tab: switch view | ↑/↓: navigate | Enter: select | /: search | m/Esc: menu | q: quit"))
+		// Show different help text based on current view
+		if m.currentView == lobbyViewDirectMessages {
+			b.WriteString(helpStyle.Render("Tab: switch view | ↑/↓: navigate | Enter: select | n: new DM | /: search | m/Esc: menu | q: quit"))
+		} else {
+			b.WriteString(helpStyle.Render("Tab: switch view | ↑/↓: navigate | Enter: select | /: search | m/Esc: menu | q: quit"))
+		}
 
 	case stateConversation:
-		if m.currentRoom != nil {
-			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
+		// Display header based on whether this is a DM or group room
+		if m.currentDMUser != nil {
+			// Direct message header - show other user's name and online status
+			var statusIcon string
+			if m.currentDMUser.IsOnline {
+				statusIcon = onlineStyle.Render("●")
+			} else {
+				statusIcon = offlineStyle.Render("○")
+			}
+			b.WriteString(titleStyle.Render(m.currentDMUser.Username))
 			b.WriteString(" ")
-			b.WriteString(statusStyle.Render("- " + m.user.Username))
+			b.WriteString(statusIcon)
 			b.WriteString("\n\n")
-		} else if m.currentDMUser != nil {
-			b.WriteString(titleStyle.Render("DM with " + m.currentDMUser.Username))
+		} else if m.currentRoom != nil {
+			// Group room header - show room name
+			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
 			b.WriteString(" ")
 			b.WriteString(statusStyle.Render("- " + m.user.Username))
 			b.WriteString("\n\n")
@@ -2327,7 +2747,21 @@ func (m Model) View() string {
 		}
 
 	case stateEditingMessage:
-		if m.currentRoom != nil {
+		// Display header based on whether this is a DM or group room
+		if m.currentDMUser != nil {
+			var statusIcon string
+			if m.currentDMUser.IsOnline {
+				statusIcon = onlineStyle.Render("●")
+			} else {
+				statusIcon = offlineStyle.Render("○")
+			}
+			b.WriteString(titleStyle.Render(m.currentDMUser.Username))
+			b.WriteString(" ")
+			b.WriteString(statusIcon)
+			b.WriteString(" ")
+			b.WriteString(statusStyle.Render("- Editing Message"))
+			b.WriteString("\n\n")
+		} else if m.currentRoom != nil {
 			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
 			b.WriteString(" ")
 			b.WriteString(statusStyle.Render("- Editing Message"))
@@ -2351,7 +2785,21 @@ func (m Model) View() string {
 		b.WriteString(helpStyle.Render("Enter: save changes | Esc: cancel"))
 
 	case stateConfirmDelete:
-		if m.currentRoom != nil {
+		// Display header based on whether this is a DM or group room
+		if m.currentDMUser != nil {
+			var statusIcon string
+			if m.currentDMUser.IsOnline {
+				statusIcon = onlineStyle.Render("●")
+			} else {
+				statusIcon = offlineStyle.Render("○")
+			}
+			b.WriteString(titleStyle.Render(m.currentDMUser.Username))
+			b.WriteString(" ")
+			b.WriteString(statusIcon)
+			b.WriteString(" ")
+			b.WriteString(statusStyle.Render("- Delete Message"))
+			b.WriteString("\n\n")
+		} else if m.currentRoom != nil {
 			b.WriteString(titleStyle.Render("# " + m.currentRoom.Name))
 			b.WriteString(" ")
 			b.WriteString(statusStyle.Render("- Delete Message"))
@@ -2520,6 +2968,85 @@ func (m Model) View() string {
 		} else {
 			b.WriteString(helpStyle.Render("Tab: type reply | Esc: exit thread"))
 		}
+
+	case stateNewDMDialog:
+		b.WriteString(titleStyle.Render("Start New Direct Message"))
+		b.WriteString(" ")
+		b.WriteString(statusStyle.Render("- " + m.user.Username))
+		b.WriteString("\n\n")
+
+		// Search input
+		b.WriteString("Search users: ")
+		b.WriteString(m.dmSearchInput.View())
+		b.WriteString("\n\n")
+
+		// User list
+		if len(m.filteredAvailableUsers) == 0 {
+			if m.dmSearchInput.Value() != "" {
+				b.WriteString(statusStyle.Render("No users match your search."))
+			} else if len(m.availableUsers) == 0 {
+				b.WriteString(statusStyle.Render("Loading users..."))
+			} else {
+				b.WriteString(statusStyle.Render("No users available."))
+			}
+		} else {
+			b.WriteString(fmt.Sprintf("Available users (%d):\n\n", len(m.filteredAvailableUsers)))
+
+			// Show max 15 items for scrolling
+			startIdx := 0
+			endIdx := len(m.filteredAvailableUsers)
+			if endIdx > 15 {
+				if m.availableUserIndex > 7 {
+					startIdx = m.availableUserIndex - 7
+				}
+				endIdx = startIdx + 15
+				if endIdx > len(m.filteredAvailableUsers) {
+					endIdx = len(m.filteredAvailableUsers)
+					startIdx = endIdx - 15
+					if startIdx < 0 {
+						startIdx = 0
+					}
+				}
+			}
+
+			if startIdx > 0 {
+				b.WriteString("  ↑ More users above\n")
+			}
+
+			for i := startIdx; i < endIdx; i++ {
+				user := m.filteredAvailableUsers[i]
+
+				// Status indicator
+				var statusIcon string
+				if user.IsOnline {
+					statusIcon = onlineStyle.Render("●")
+				} else {
+					statusIcon = offlineStyle.Render("○")
+				}
+
+				// DM exists indicator
+				var dmIndicator string
+				if user.HasDM {
+					dmIndicator = helpStyle.Render(" (existing DM)")
+				}
+
+				userLine := fmt.Sprintf("%s %s%s", statusIcon, user.Username, dmIndicator)
+
+				if i == m.availableUserIndex {
+					b.WriteString(selectedItem.Render("> " + userLine))
+				} else {
+					b.WriteString("  " + userLine)
+				}
+				b.WriteString("\n")
+			}
+
+			if endIdx < len(m.filteredAvailableUsers) {
+				b.WriteString("  ↓ More users below\n")
+			}
+		}
+
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("↑/↓: navigate | Enter: select | Esc: cancel"))
 	}
 
 	return menuStyle.Render(b.String())

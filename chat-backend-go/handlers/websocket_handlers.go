@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
+	"gorm.io/gorm"
 )
 
 var (
@@ -18,9 +19,9 @@ var (
 	Hub *ws.Hub
 )
 
-// InitWebSocketHub initializes the WebSocket hub
-func InitWebSocketHub() {
-	Hub = ws.NewHub()
+// InitWebSocketHub initializes the WebSocket hub with database connection
+func InitWebSocketHub(db *gorm.DB) {
+	Hub = ws.NewHub(db)
 	go Hub.Run()
 	log.Println("WebSocket hub initialized and running")
 }

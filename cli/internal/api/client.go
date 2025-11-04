@@ -58,8 +58,21 @@ type User struct {
 type Room struct {
 	ID        uint      `json:"id"`
 	Name      string    `json:"name"`
+	Type      string    `json:"type"` // "direct" or "group"
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DirectRoom represents a direct message conversation from the API.
+type DirectRoom struct {
+	ID          uint      `json:"id"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	OtherUser   User      `json:"other_user"`
+	LastMessage *Message  `json:"last_message,omitempty"`
+	UnreadCount int       `json:"unread_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Message represents a chat message from the API.
@@ -90,6 +103,19 @@ type APIError struct {
 	Error string `json:"error"`
 }
 
+// handleErrorResponse processes error responses from the API
+func (c *Client) handleErrorResponse(resp *http.Response) error {
+	if resp.StatusCode < 400 {
+		return nil
+	}
+
+	var apiErr APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
+		return fmt.Errorf("api error: %s", resp.Status)
+	}
+	return errors.New(apiErr.Error)
+}
+
 func (c *Client) postJSON(path string, reqBody any, v any) error {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -108,12 +134,8 @@ func (c *Client) postJSON(path string, reqBody any, v any) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return fmt.Errorf("api error: %s", resp.Status)
-		}
-		return errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return err
 	}
 
 	if v != nil {
@@ -176,12 +198,8 @@ func (c *Client) Profile(token string) (*User, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var user User
@@ -205,12 +223,8 @@ func (c *Client) GetRooms(token string) ([]Room, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var response struct {
@@ -287,12 +301,8 @@ func (c *Client) UpdateRoom(token string, roomID uint, name string) (*Room, erro
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var response struct {
@@ -320,15 +330,7 @@ func (c *Client) DeleteRoom(token string, roomID uint) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return fmt.Errorf("api error: %s", resp.Status)
-		}
-		return errors.New(apiErr.Error)
-	}
-
-	return nil
+	return c.handleErrorResponse(resp)
 }
 
 // GetUsers fetches the list of available users using a bearer token.
@@ -351,12 +353,8 @@ func (c *Client) GetUsers(token, search string) ([]User, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var response struct {
@@ -392,12 +390,8 @@ func (c *Client) GetMessages(token string, roomID uint, page, limit int) ([]Mess
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var response struct {
@@ -438,12 +432,8 @@ func (c *Client) SendMessage(token string, roomID uint, content string, parentID
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var response struct {
@@ -481,12 +471,8 @@ func (c *Client) UpdateMessage(token string, messageID uint, content string) (*M
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return nil, fmt.Errorf("api error: %s", resp.Status)
-		}
-		return nil, errors.New(apiErr.Error)
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var response struct {
@@ -514,13 +500,109 @@ func (c *Client) DeleteMessage(token string, messageID uint) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil || apiErr.Error == "" {
-			return fmt.Errorf("api error: %s", resp.Status)
-		}
-		return errors.New(apiErr.Error)
+	return c.handleErrorResponse(resp)
+}
+
+// GetDirectRooms fetches the list of direct message conversations using a bearer token.
+func (c *Client) GetDirectRooms(token string) ([]DirectRoom, error) {
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/api/v1/rooms/direct", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
 	}
 
-	return nil
+	var response struct {
+		Success bool         `json:"success"`
+		Message string       `json:"message"`
+		Data    []DirectRoom `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// CreateDirectRoom creates or retrieves a direct message room with a target user.
+func (c *Client) CreateDirectRoom(token string, targetUserID uint) (*DirectRoom, error) {
+	payload := map[string]uint{
+		"target_user_id": targetUserID,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/api/v1/rooms/direct", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool       `json:"success"`
+		Message string     `json:"message"`
+		Data    DirectRoom `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// AvailableUser represents a user available for starting a DM.
+type AvailableUser struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	IsOnline bool   `json:"is_online"`
+	HasDM    bool   `json:"has_dm"`
+}
+
+// GetAvailableUsers fetches the list of users available for starting a DM.
+func (c *Client) GetAvailableUsers(token string) ([]AvailableUser, error) {
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/api/v1/users/available", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.handleErrorResponse(resp); err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool            `json:"success"`
+		Message string          `json:"message"`
+		Data    []AvailableUser `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
 }

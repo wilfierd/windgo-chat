@@ -13,4 +13,5 @@ func UserRoutes(app *fiber.App) {
 	// Apply activity tracking to all authenticated routes
 	users := api.Group("/users", middleware.AuthRequired(), middleware.TrackActivity())
 	users.Get("/", handlers.ListUsers)
+	users.Get("/available", handlers.GetAvailableUsers)
 }
