@@ -140,10 +140,37 @@ func CreateRoom(c *fiber.Ctx) error {
 	// Create new room (allow duplicate names - they'll be distinguished by ID)
 	room := models.Room{
 		Name: sanitizedName,
+		Type: models.RoomTypeGroup, // Group room by default
 	}
 
-	if err := config.DB.Create(&room).Error; err != nil {
+	// Begin transaction
+	tx := config.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	if err := tx.Create(&room).Error; err != nil {
+		tx.Rollback()
 		return utils.RespondInternalErrorWithLog(c, err, "CreateRoom")
+	}
+
+	// Add creator as owner of the room
+	membership := models.RoomMembership{
+		UserID: userID,
+		RoomID: room.ID,
+		Role:   models.RoleOwner,
+	}
+
+	if err := tx.Create(&membership).Error; err != nil {
+		tx.Rollback()
+		return utils.RespondInternalErrorWithLog(c, err, "CreateRoom - create owner membership")
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "CreateRoom - commit transaction")
 	}
 
 	utils.LogInfo("Room created successfully", map[string]interface{}{
@@ -297,37 +324,37 @@ func CreateDirectRoom(c *fiber.Ctx) error {
 		user models.User
 		err  error
 	}
-	
+
 	currentUserChan := make(chan userFetchResult, 1)
 	targetUserChan := make(chan userFetchResult, 1)
-	
+
 	// Fetch current user
 	go func() {
 		var user models.User
 		err := config.DB.First(&user, currentUserID).Error
 		currentUserChan <- userFetchResult{user: user, err: err}
 	}()
-	
+
 	// Fetch target user
 	go func() {
 		var user models.User
 		err := config.DB.First(&user, req.TargetUserID).Error
 		targetUserChan <- userFetchResult{user: user, err: err}
 	}()
-	
+
 	// Wait for both fetches to complete
 	currentUserResult := <-currentUserChan
 	targetUserResult := <-targetUserChan
-	
+
 	// Check for errors
 	if currentUserResult.err != nil {
 		return utils.RespondInternalErrorWithLog(c, currentUserResult.err, "CreateDirectRoom - fetch current user")
 	}
-	
+
 	if targetUserResult.err != nil {
 		return utils.RespondNotFound(c, "Target user not found")
 	}
-	
+
 	currentUser := currentUserResult.user
 	targetUser := targetUserResult.user
 
@@ -384,10 +411,11 @@ func CreateDirectRoom(c *fiber.Ctx) error {
 		return utils.RespondInternalErrorWithLog(c, err, "CreateDirectRoom - create room")
 	}
 
-	// Create room membership for current user
+	// Create room membership for current user (owner in direct rooms)
 	membership1 := models.RoomMembership{
 		UserID: currentUserID,
 		RoomID: room.ID,
+		Role:   models.RoleOwner, // Both users are owners in direct rooms
 	}
 
 	if err := tx.Create(&membership1).Error; err != nil {
@@ -395,10 +423,11 @@ func CreateDirectRoom(c *fiber.Ctx) error {
 		return utils.RespondInternalErrorWithLog(c, err, "CreateDirectRoom - create membership 1")
 	}
 
-	// Create room membership for target user
+	// Create room membership for target user (owner in direct rooms)
 	membership2 := models.RoomMembership{
 		UserID: req.TargetUserID,
 		RoomID: room.ID,
+		Role:   models.RoleOwner, // Both users are owners in direct rooms
 	}
 
 	if err := tx.Create(&membership2).Error; err != nil {
@@ -476,7 +505,7 @@ func GetDirectRooms(c *fiber.Ctx) error {
 	go func() {
 		var lastMessages []models.Message
 		var fetchErr error
-		
+
 		if len(roomIDs) > 0 {
 			// Use a subquery to get only the most recent message per room
 			fetchErr = config.DB.Raw(`
@@ -491,7 +520,7 @@ func GetDirectRooms(c *fiber.Ctx) error {
 				WHERE m.deleted_at IS NULL
 			`, roomIDs).Scan(&lastMessages).Error
 		}
-		
+
 		messageChan <- fetchResult{messages: lastMessages, err: fetchErr}
 	}()
 
@@ -513,7 +542,7 @@ func GetDirectRooms(c *fiber.Ctx) error {
 	// Transform rooms to include other_user, last_message, and unread_count
 	// Use concurrent processing for better performance with many rooms
 	response := make([]DirectRoomResponse, 0, len(rooms))
-	
+
 	// For small number of rooms, sequential processing is faster
 	// For larger sets, use concurrent processing
 	if len(rooms) <= 10 {
@@ -529,9 +558,9 @@ func GetDirectRooms(c *fiber.Ctx) error {
 			response DirectRoomResponse
 			valid    bool
 		}
-		
+
 		resultChan := make(chan roomResult, len(rooms))
-		
+
 		// Process rooms concurrently
 		for _, room := range rooms {
 			go func(r models.Room) {
@@ -542,7 +571,7 @@ func GetDirectRooms(c *fiber.Ctx) error {
 				}
 			}(room)
 		}
-		
+
 		// Collect results
 		for i := 0; i < len(rooms); i++ {
 			result := <-resultChan
@@ -610,6 +639,7 @@ func GetRoomParticipants(c *fiber.Ctx) error {
 	type ParticipantResponse struct {
 		ID       uint      `json:"id"`
 		Username string    `json:"username"`
+		Role     string    `json:"role"`
 		IsOnline bool      `json:"is_online"`
 		JoinedAt time.Time `json:"joined_at"`
 	}
@@ -619,6 +649,7 @@ func GetRoomParticipants(c *fiber.Ctx) error {
 		participants = append(participants, ParticipantResponse{
 			ID:       membership.User.ID,
 			Username: membership.User.Username,
+			Role:     membership.Role,
 			IsOnline: membership.User.IsOnline,
 			JoinedAt: membership.JoinedAt,
 		})
@@ -630,4 +661,185 @@ func GetRoomParticipants(c *fiber.Ctx) error {
 	})
 
 	return utils.RespondSuccess(c, "Participants retrieved successfully", participants)
+}
+
+// InviteUserToRoom invites a user to join a room (requires admin or owner role)
+func InviteUserToRoom(c *fiber.Ctx) error {
+	// Get authenticated user ID from context
+	currentUserID, ok := c.Locals("userID").(uint)
+	if !ok {
+		return utils.RespondUnauthorized(c, utils.ErrUnauthorized)
+	}
+
+	// Get room ID from URL params
+	roomID, err := parseRoomID(c)
+	if err != nil {
+		return err
+	}
+
+	// Parse request body
+	type InviteRequest struct {
+		UserID uint   `json:"user_id" validate:"required,min=1"`
+		Role   string `json:"role"` // Optional, defaults to "member"
+	}
+
+	var req InviteRequest
+	if err := c.BodyParser(&req); err != nil {
+		return utils.RespondBadRequest(c, "Invalid request data. Please check your input.")
+	}
+
+	// Validate user_id is provided
+	if req.UserID == 0 {
+		return utils.RespondBadRequest(c, "user_id must be a valid positive number")
+	}
+
+	// Set default role if not provided
+	if req.Role == "" {
+		req.Role = models.RoleMember
+	}
+
+	// Validate role
+	if req.Role != models.RoleMember && req.Role != models.RoleAdmin && req.Role != models.RoleOwner {
+		return utils.RespondBadRequest(c, "Invalid role. Must be one of: member, admin, owner")
+	}
+
+	// Check if room exists
+	var room models.Room
+	if err := config.DB.First(&room, roomID).Error; err != nil {
+		return utils.RespondNotFound(c, utils.ErrRoomNotFound)
+	}
+
+	// Check if target user exists
+	var targetUser models.User
+	if err := config.DB.First(&targetUser, req.UserID).Error; err != nil {
+		return utils.RespondNotFound(c, "User not found")
+	}
+
+	// Check if user already a member
+	var existingMembership models.RoomMembership
+	err = config.DB.Where("user_id = ? AND room_id = ?", req.UserID, roomID).First(&existingMembership).Error
+	if err == nil {
+		return utils.RespondBadRequest(c, "User is already a member of this room")
+	}
+
+	// Create membership
+	membership := models.RoomMembership{
+		UserID: req.UserID,
+		RoomID: roomID,
+		Role:   req.Role,
+	}
+
+	if err := config.DB.Create(&membership).Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "InviteUserToRoom - create membership")
+	}
+
+	// Invalidate membership cache if Hub is available
+	if Hub != nil {
+		Hub.InvalidateMembershipCache(roomID)
+	}
+
+	utils.LogInfo("User invited to room successfully", map[string]interface{}{
+		"room_id":         roomID,
+		"invited_user_id": req.UserID,
+		"role":            req.Role,
+		"inviter_id":      currentUserID,
+	})
+
+	// Load membership with user data
+	if err := config.DB.Preload("User").First(&membership, membership.ID).Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "InviteUserToRoom - load membership")
+	}
+
+	return utils.RespondCreated(c, "User invited to room successfully", membership)
+}
+
+// RemoveUserFromRoom removes a user from a room or allows user to leave (requires admin/owner to kick, anyone can leave)
+func RemoveUserFromRoom(c *fiber.Ctx) error {
+	// Get authenticated user ID from context
+	currentUserID, ok := c.Locals("userID").(uint)
+	if !ok {
+		return utils.RespondUnauthorized(c, utils.ErrUnauthorized)
+	}
+
+	// Get room ID from URL params
+	roomID, err := parseRoomID(c)
+	if err != nil {
+		return err
+	}
+
+	// Get target user ID from URL params
+	targetUserIDStr := c.Params("userId")
+	targetUserID, err := strconv.ParseUint(targetUserIDStr, 10, 32)
+	if err != nil {
+		return utils.RespondBadRequest(c, "Invalid user ID format")
+	}
+
+	// Check if room exists
+	var room models.Room
+	if err := config.DB.First(&room, roomID).Error; err != nil {
+		return utils.RespondNotFound(c, utils.ErrRoomNotFound)
+	}
+
+	// Check if target user is a member
+	var targetMembership models.RoomMembership
+	if err := config.DB.Where("user_id = ? AND room_id = ?", uint(targetUserID), roomID).First(&targetMembership).Error; err != nil {
+		return utils.RespondNotFound(c, "User is not a member of this room")
+	}
+
+	// Check permission: user can remove themselves, or admin/owner can remove others
+	isSelfRemoval := currentUserID == uint(targetUserID)
+
+	if !isSelfRemoval {
+		// Get current user's membership to check their role
+		var currentMembership models.RoomMembership
+		if err := config.DB.Where("user_id = ? AND room_id = ?", currentUserID, roomID).First(&currentMembership).Error; err != nil {
+			return utils.RespondForbidden(c, "You are not a member of this room")
+		}
+
+		// Only admin or owner can remove other users
+		if currentMembership.Role != models.RoleAdmin && currentMembership.Role != models.RoleOwner {
+			return utils.RespondForbidden(c, "Only admins and owners can remove other users")
+		}
+
+		// Owner cannot be removed by admin
+		if targetMembership.Role == models.RoleOwner && currentMembership.Role != models.RoleOwner {
+			return utils.RespondForbidden(c, "Only the owner can remove another owner")
+		}
+	}
+
+	// Prevent owner from leaving if they're the only owner
+	if targetMembership.Role == models.RoleOwner {
+		var ownerCount int64
+		config.DB.Model(&models.RoomMembership{}).
+			Where("room_id = ? AND role = ?", roomID, models.RoleOwner).
+			Count(&ownerCount)
+
+		if ownerCount <= 1 {
+			return utils.RespondBadRequest(c, "Cannot remove the only owner. Transfer ownership first.")
+		}
+	}
+
+	// Delete membership
+	if err := config.DB.Delete(&targetMembership).Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "RemoveUserFromRoom - delete membership")
+	}
+
+	// Invalidate membership cache if Hub is available
+	if Hub != nil {
+		Hub.InvalidateMembershipCache(roomID)
+	}
+
+	action := "left"
+	if !isSelfRemoval {
+		action = "removed from"
+	}
+
+	utils.LogInfo("User "+action+" room successfully", map[string]interface{}{
+		"room_id":         roomID,
+		"target_user_id":  uint(targetUserID),
+		"removed_by":      currentUserID,
+		"is_self_removal": isSelfRemoval,
+	})
+
+	return utils.RespondSuccess(c, "User "+action+" room successfully", nil)
 }

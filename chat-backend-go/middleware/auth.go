@@ -17,6 +17,13 @@ const (
 	UserIDKey contextKey = "userID"
 )
 
+// GetUserID safely retrieves the user ID from the Fiber context
+// Returns the userID and a boolean indicating if the retrieval was successful
+func GetUserID(c *fiber.Ctx) (uint, bool) {
+	userID, ok := c.Locals(string(UserIDKey)).(uint)
+	return userID, ok
+}
+
 // AuthRequired middleware validates JWT token and extracts user ID
 func AuthRequired() fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -152,7 +159,98 @@ func RequireRoomMembership() fiber.Handler {
 			})
 		}
 
+		// Store membership in context for use in handlers
+		c.Locals("membership", membership)
+
 		// User is a member, allow access
 		return c.Next()
 	}
+}
+
+// RequireRoomRole middleware verifies that the authenticated user has a specific role in the room
+// Accepts minimum required role (member, admin, or owner)
+// Role hierarchy: owner > admin > member
+func RequireRoomRole(minRole string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Get authenticated user ID from context
+		userID, ok := c.Locals(string(UserIDKey)).(uint)
+		if !ok {
+			return c.Status(401).JSON(fiber.Map{
+				"error": "Authentication required",
+			})
+		}
+
+		// Get room ID from URL parameter
+		roomIDParam := c.Params("id")
+		if roomIDParam == "" {
+			// Try alternative parameter name used in some routes
+			roomIDParam = c.Params("roomId")
+		}
+
+		if roomIDParam == "" {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Room ID is required",
+			})
+		}
+
+		// Convert room ID to uint
+		roomID, err := strconv.ParseUint(roomIDParam, 10, 32)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Invalid room ID format",
+			})
+		}
+
+		// Check if user is a member of the room and get their role
+		var membership models.RoomMembership
+		result := config.DB.Where("user_id = ? AND room_id = ?", userID, uint(roomID)).First(&membership)
+
+		if result.Error != nil {
+			// User is not a member of this room
+			return c.Status(403).JSON(fiber.Map{
+				"error": "You are not a participant of this conversation",
+			})
+		}
+
+		// Check role hierarchy
+		if !hasRequiredRole(membership.Role, minRole) {
+			return c.Status(403).JSON(fiber.Map{
+				"error": "Insufficient permissions for this operation",
+			})
+		}
+
+		// Store membership in context for use in handlers
+		c.Locals("membership", membership)
+
+		// User has required role, allow access
+		return c.Next()
+	}
+}
+
+// hasRequiredRole checks if userRole meets the minimum required role
+// Role hierarchy: owner > admin > member
+func hasRequiredRole(userRole, minRole string) bool {
+	roleLevel := map[string]int{
+		models.RoleMember: 1,
+		models.RoleAdmin:  2,
+		models.RoleOwner:  3,
+	}
+
+	userLevel := roleLevel[userRole]
+	minLevel := roleLevel[minRole]
+
+	return userLevel >= minLevel
+}
+
+// GetUserRole retrieves the user's role in a specific room
+// Returns role and error
+func GetUserRole(userID, roomID uint) (string, error) {
+	var membership models.RoomMembership
+	result := config.DB.Where("user_id = ? AND room_id = ?", userID, roomID).First(&membership)
+
+	if result.Error != nil {
+		return "", result.Error
+	}
+
+	return membership.Role, nil
 }

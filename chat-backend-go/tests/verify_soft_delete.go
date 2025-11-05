@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	baseURL = flag.String("url", "http://localhost:8080", "Base URL of the API server")
-	adminEmail = flag.String("admin-email", "admin@windgo.com", "Admin email")
+	baseURL       = flag.String("url", "http://localhost:8080", "Base URL of the API server")
+	adminEmail    = flag.String("admin-email", "admin@windgo.com", "Admin email")
 	adminPassword = flag.String("admin-password", "admin123", "Admin password")
 )
 

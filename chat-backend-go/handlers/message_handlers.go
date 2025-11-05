@@ -144,10 +144,23 @@ func GetMessages(c *fiber.Ctx) error {
 	})
 }
 
-// GetRooms retrieves all available rooms
+// GetRooms retrieves all rooms the authenticated user is a member of (excluding direct rooms)
 func GetRooms(c *fiber.Ctx) error {
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		return utils.RespondUnauthorized(c, utils.ErrUnauthorized)
+	}
+
+	// Query for group rooms where the user is a member
 	var rooms []models.Room
-	if err := config.DB.Find(&rooms).Error; err != nil {
+	err := config.DB.
+		Joins("JOIN room_memberships ON room_memberships.room_id = rooms.id").
+		Where("room_memberships.user_id = ?", userID).
+		Where("rooms.type = ?", models.RoomTypeGroup).
+		Find(&rooms).Error
+
+	if err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "GetRooms - fetch rooms")
 	}
 

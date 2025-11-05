@@ -12,23 +12,23 @@ import (
 
 // SetupAuthRoutes sets up authentication related routes
 func SetupAuthRoutes(app *fiber.App) {
-    // Create auth group
-    auth := app.Group("/api/auth")
+	// Create auth group
+	auth := app.Group("/api/auth")
 
-    // Public routes (no authentication required)
-    auth.Post("/register", handlers.Register)
-    auth.Post("/login", handlers.Login)
-    // OAuth with GitHub (web)
-    auth.Get("/github/login", handlers.GitHubLogin)
-    auth.Get("/github/callback", handlers.GitHubCallback)
-    auth.Get("/github/status", handlers.GitHubConfigStatus)
+	// Public routes (no authentication required)
+	auth.Post("/register", handlers.Register)
+	auth.Post("/login", handlers.Login)
+	// OAuth with GitHub (web)
+	auth.Get("/github/login", handlers.GitHubLogin)
+	auth.Get("/github/callback", handlers.GitHubCallback)
+	auth.Get("/github/status", handlers.GitHubConfigStatus)
 
-    // OAuth with GitHub (Device Flow for CLI)
-    auth.Post("/github/device/start", handlers.GitHubDeviceStart)
-    auth.Post("/github/device/poll", handlers.GitHubDevicePoll)
+	// OAuth with GitHub (Device Flow for CLI)
+	auth.Post("/github/device/start", handlers.GitHubDeviceStart)
+	auth.Post("/github/device/poll", handlers.GitHubDevicePoll)
 
-    // Protected routes (authentication required with activity tracking)
-    auth.Get("/profile", middleware.AuthRequired(), middleware.TrackActivity(), handlers.GetProfile)
+	// Protected routes (authentication required with activity tracking)
+	auth.Get("/profile", middleware.AuthRequired(), middleware.TrackActivity(), handlers.GetProfile)
 	auth.Post("/refresh", middleware.AuthRequired(), middleware.TrackActivity(), func(c *fiber.Ctx) error {
 		// Get user ID from middleware
 		userID := c.Locals("userID").(uint)
