@@ -127,7 +127,7 @@ func GetAvailableUsers(c *fiber.Ctx) error {
 	// Build response with online status and has_dm flag
 	// Use concurrent processing for better performance with many users
 	response := make([]UserAvailableResponse, len(users))
-	
+
 	// For small number of users, sequential processing is faster
 	if len(users) <= 20 {
 		for i, user := range users {
@@ -137,13 +137,13 @@ func GetAvailableUsers(c *fiber.Ctx) error {
 		// Concurrent processing for larger sets using worker pool
 		const numWorkers = 10
 		userChan := make(chan int, len(users))
-		
+
 		// Send user indices to channel
 		for i := range users {
 			userChan <- i
 		}
 		close(userChan)
-		
+
 		// Start workers
 		var wg sync.WaitGroup
 		for w := 0; w < numWorkers; w++ {
@@ -155,7 +155,7 @@ func GetAvailableUsers(c *fiber.Ctx) error {
 				}
 			}()
 		}
-		
+
 		wg.Wait()
 	}
 
