@@ -71,7 +71,7 @@ type DirectRoom struct {
 	Type        string    `json:"type"`
 	OtherUser   User      `json:"other_user"`
 	LastMessage *Message  `json:"last_message,omitempty"`
-	UnreadCount int       `json:"unread_count"`
+	UnreadCount int64     `json:"unread_count"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
