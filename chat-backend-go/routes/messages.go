@@ -28,6 +28,9 @@ func MessageRoutes(app *fiber.App) {
 	protected.Put("/messages/:id", handlers.UpdateMessage)
 	protected.Delete("/messages/:id", handlers.DeleteMessage)
 
+	// Mark room as read route
+	protected.Post("/rooms/:id/read", handlers.MarkRoomAsRead)
+
 	// Room management routes (admin only - checked within handlers)
 	protected.Post("/rooms", handlers.CreateRoom)
 	protected.Put("/rooms/:id", handlers.UpdateRoom)

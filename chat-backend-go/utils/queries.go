@@ -128,3 +128,90 @@ func VerifyRoomMembership(db *gorm.DB, userID, roomID uint) error {
 	}
 	return nil
 }
+
+// GetLastReadMessage - Get the last read message for a user in a room
+func GetLastReadMessage(userID, roomID uint) (*models.UserRoomLastRead, error) {
+	var lastRead models.UserRoomLastRead
+	err := config.DB.Where("user_id = ? AND room_id = ?", userID, roomID).
+		Preload("LastReadMessage").
+		First(&lastRead).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil // No last read record exists yet
+	}
+	return &lastRead, err
+}
+
+// UpdateLastReadMessage - Update or create the last read message for a user in a room
+func UpdateLastReadMessage(userID, roomID, messageID uint) error {
+	lastRead := models.UserRoomLastRead{
+		UserID:            userID,
+		RoomID:            roomID,
+		LastReadMessageID: &messageID,
+		LastReadAt:        time.Now(),
+	}
+
+	// Use GORM's upsert functionality
+	// This will update if exists (based on unique index), or create if not
+	return config.DB.Where(models.UserRoomLastRead{UserID: userID, RoomID: roomID}).
+		Assign(map[string]interface{}{
+			"last_read_message_id": messageID,
+			"last_read_at":         time.Now(),
+		}).
+		FirstOrCreate(&lastRead).Error
+}
+
+// GetUnreadCount - Get the count of unread messages for a user in a room
+func GetUnreadCount(userID, roomID uint) (int64, error) {
+	// Get the last read message
+	lastRead, err := GetLastReadMessage(userID, roomID)
+	if err != nil {
+		return 0, err
+	}
+
+	var count int64
+
+	// If no last read record, count all messages in the room
+	if lastRead == nil || lastRead.LastReadMessageID == nil {
+		err := config.DB.Model(&models.Message{}).
+			Where("room_id = ?", roomID).
+			Count(&count).Error
+		return count, err
+	}
+
+	// Count messages created after the last read message
+	// We need to get the timestamp of the last read message
+	var lastReadMessage models.Message
+	if err := config.DB.First(&lastReadMessage, lastRead.LastReadMessageID).Error; err != nil {
+		return 0, err
+	}
+
+	err = config.DB.Model(&models.Message{}).
+		Where("room_id = ? AND created_at > ?", roomID, lastReadMessage.CreatedAt).
+		Count(&count).Error
+
+	return count, err
+}
+
+// GetUnreadCountsForUser - Get unread counts for all rooms the user is a member of
+func GetUnreadCountsForUser(userID uint) (map[uint]int64, error) {
+	// Get all rooms the user is a member of
+	var memberships []models.RoomMembership
+	if err := config.DB.Where("user_id = ?", userID).Find(&memberships).Error; err != nil {
+		return nil, err
+	}
+
+	unreadCounts := make(map[uint]int64)
+
+	// Get unread count for each room
+	for _, membership := range memberships {
+		count, err := GetUnreadCount(userID, membership.RoomID)
+		if err != nil {
+			// Log error but continue for other rooms
+			continue
+		}
+		unreadCounts[membership.RoomID] = count
+	}
+
+	return unreadCounts, nil
+}
