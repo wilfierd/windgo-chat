@@ -70,7 +70,7 @@ func requireAdmin(c *fiber.Ctx, operation string) (*models.User, error) {
 
 // buildDirectRoomResponse builds a DirectRoomResponse from a room
 // This is extracted to support concurrent processing
-func buildDirectRoomResponse(room models.Room, currentUserID uint, lastMsgMap map[uint]models.Message) (DirectRoomResponse, bool) {
+func buildDirectRoomResponse(room models.Room, currentUserID uint, lastMsgMap map[uint]models.Message, unreadCounts map[uint]int64) (DirectRoomResponse, bool) {
 	// Extract other user (the participant who is not the current user)
 	var otherUser *models.User
 	for _, member := range room.Members {
@@ -97,7 +97,7 @@ func buildDirectRoomResponse(room models.Room, currentUserID uint, lastMsgMap ma
 			IsOnline:     otherUser.IsOnline,
 			LastActiveAt: otherUser.LastActiveAt,
 		},
-		UnreadCount: 0, // TODO: Calculate actual unread count when read tracking is implemented
+		UnreadCount: int(unreadCounts[room.ID]), // Get actual unread count from map
 		CreatedAt:   room.CreatedAt,
 	}
 
@@ -539,6 +539,16 @@ func GetDirectRooms(c *fiber.Ctx) error {
 		lastMsgMap[msg.RoomID] = msg
 	}
 
+	// Get unread counts for all direct rooms
+	unreadCounts, err := utils.GetUnreadCountsForUser(currentUserID)
+	if err != nil {
+		utils.LogError("Failed to fetch unread counts", err, map[string]interface{}{
+			"user_id": currentUserID,
+		})
+		// Continue with empty unread counts rather than failing
+		unreadCounts = make(map[uint]int64)
+	}
+
 	// Transform rooms to include other_user, last_message, and unread_count
 	// Use concurrent processing for better performance with many rooms
 	response := make([]DirectRoomResponse, 0, len(rooms))
@@ -548,7 +558,7 @@ func GetDirectRooms(c *fiber.Ctx) error {
 	if len(rooms) <= 10 {
 		// Sequential processing for small sets
 		for _, room := range rooms {
-			if dmResponse, ok := buildDirectRoomResponse(room, currentUserID, lastMsgMap); ok {
+			if dmResponse, ok := buildDirectRoomResponse(room, currentUserID, lastMsgMap, unreadCounts); ok {
 				response = append(response, dmResponse)
 			}
 		}
@@ -564,7 +574,7 @@ func GetDirectRooms(c *fiber.Ctx) error {
 		// Process rooms concurrently
 		for _, room := range rooms {
 			go func(r models.Room) {
-				if dmResponse, ok := buildDirectRoomResponse(r, currentUserID, lastMsgMap); ok {
+				if dmResponse, ok := buildDirectRoomResponse(r, currentUserID, lastMsgMap, unreadCounts); ok {
 					resultChan <- roomResult{response: dmResponse, valid: true}
 				} else {
 					resultChan <- roomResult{valid: false}

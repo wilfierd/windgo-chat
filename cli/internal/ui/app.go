@@ -394,6 +394,11 @@ type directRoomCreatedMsg struct {
 	err        error
 }
 
+type roomMarkedAsReadMsg struct {
+	roomID uint
+	err    error
+}
+
 func (m Model) Init() tea.Cmd {
 	return loadStoredCredentials()
 }
@@ -551,6 +556,16 @@ func deleteMessageCmd(client *api.Client, token string, messageID uint) tea.Cmd 
 			return messageDeletedMsg{err: err}
 		}
 		return messageDeletedMsg{messageID: messageID}
+	}
+}
+
+func markRoomAsReadCmd(client *api.Client, token string, roomID uint) tea.Cmd {
+	return func() tea.Msg {
+		err := client.MarkRoomAsRead(token, roomID)
+		if err != nil {
+			return roomMarkedAsReadMsg{roomID: roomID, err: err}
+		}
+		return roomMarkedAsReadMsg{roomID: roomID}
 	}
 }
 
@@ -1717,10 +1732,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 						m.messageInput.Focus()
 						m.currentPage = 1
 						m.hasMoreMessages = true
-						// Load initial messages via REST and join room via WebSocket
+						// Load initial messages via REST, join room via WebSocket, and mark as read
 						return m, tea.Batch(
 							loadMessagesCmd(m.client, m.token, selectedRoom.ID),
 							joinRoomCmd(m.wsClient, selectedRoom.ID),
+							markRoomAsReadCmd(m.client, m.token, selectedRoom.ID),
 						)
 					}
 				case lobbyViewPeople:
@@ -1749,10 +1765,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 						m.messageInput.Focus()
 						m.currentPage = 1
 						m.hasMoreMessages = true
-						// Load initial messages via REST and join room via WebSocket
+						// Load initial messages via REST, join room via WebSocket, and mark as read
 						return m, tea.Batch(
 							loadMessagesCmd(m.client, m.token, selectedDM.ID),
 							joinRoomCmd(m.wsClient, selectedDM.ID),
+							markRoomAsReadCmd(m.client, m.token, selectedDM.ID),
 						)
 					}
 				}
@@ -2482,10 +2499,17 @@ func (m Model) View() string {
 				}
 				for i := startIdx; i < endIdx; i++ {
 					room := m.filteredRooms[i]
+					roomDisplay := room.Name
+
+					// Add unread badge if there are unread messages
+					if room.UnreadCount > 0 {
+						roomDisplay += " " + errorStyle.Render(fmt.Sprintf("(%d)", room.UnreadCount))
+					}
+
 					if i == m.roomIndex {
-						b.WriteString(selectedItem.Render(fmt.Sprintf("> %s", room.Name)))
+						b.WriteString(selectedItem.Render(fmt.Sprintf("> %s", roomDisplay)))
 					} else {
-						b.WriteString(fmt.Sprintf("  %s", room.Name))
+						b.WriteString(fmt.Sprintf("  %s", roomDisplay))
 					}
 					b.WriteString("\n")
 				}

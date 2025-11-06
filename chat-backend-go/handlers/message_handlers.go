@@ -4,6 +4,7 @@ import (
 	"chat-backend-go/config"
 	"chat-backend-go/middleware"
 	"chat-backend-go/models"
+	"chat-backend-go/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -164,8 +165,29 @@ func GetRooms(c *fiber.Ctx) error {
 		return utils.RespondInternalErrorWithLog(c, err, "GetRooms - fetch rooms")
 	}
 
+	// Get unread counts for all rooms
+	unreadCounts, err := utils.GetUnreadCountsForUser(userID)
+	if err != nil {
+		// Log error but continue with rooms without unread counts
+		unreadCounts = make(map[uint]int64)
+	}
+
+	// Build response with unread counts
+	type RoomWithUnread struct {
+		models.Room
+		UnreadCount int64 `json:"unread_count"`
+	}
+
+	roomsWithUnread := make([]RoomWithUnread, len(rooms))
+	for i, room := range rooms {
+		roomsWithUnread[i] = RoomWithUnread{
+			Room:        room,
+			UnreadCount: unreadCounts[room.ID],
+		}
+	}
+
 	return c.JSON(fiber.Map{
-		"rooms": rooms,
+		"rooms": roomsWithUnread,
 	})
 }
 
@@ -254,5 +276,66 @@ func DeleteMessage(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"message": "Message deleted successfully",
+	})
+}
+
+// MarkRoomAsRead marks all messages in a room as read for the authenticated user
+func MarkRoomAsRead(c *fiber.Ctx) error {
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		return utils.RespondUnauthorized(c, "User not authenticated")
+	}
+
+	// Get room ID from URL params
+	roomIDStr := c.Params("id")
+	roomID, err := strconv.ParseUint(roomIDStr, 10, 32)
+	if err != nil {
+		return utils.RespondBadRequest(c, "Invalid room ID")
+	}
+
+	// Validate room exists
+	var room models.Room
+	if err := config.DB.First(&room, roomID).Error; err != nil {
+		return utils.RespondNotFound(c, "Room not found")
+	}
+
+	// Verify user is a room participant
+	if err := utils.VerifyRoomMembership(config.DB, userID, uint(roomID)); err != nil {
+		return utils.RespondForbidden(c, err.Error())
+	}
+
+	// Get the most recent message in the room
+	var lastMessage models.Message
+	if err := config.DB.
+		Where("room_id = ?", roomID).
+		Order("created_at DESC").
+		First(&lastMessage).Error; err != nil {
+		// If there are no messages in the room, still return success
+		// No need to track last read for empty rooms
+		if err.Error() == "record not found" {
+			return c.JSON(fiber.Map{
+				"message": "Room marked as read",
+				"data": fiber.Map{
+					"room_id":      roomID,
+					"unread_count": 0,
+				},
+			})
+		}
+		return utils.RespondInternalErrorWithLog(c, err, "MarkRoomAsRead - fetch last message")
+	}
+
+	// Update or create the last read record
+	if err := utils.UpdateLastReadMessage(userID, uint(roomID), lastMessage.ID); err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "MarkRoomAsRead - update last read")
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Room marked as read",
+		"data": fiber.Map{
+			"room_id":              roomID,
+			"last_read_message_id": lastMessage.ID,
+			"unread_count":         0,
+		},
 	})
 }

@@ -56,11 +56,12 @@ type User struct {
 
 // Room represents a chat room from the API.
 type Room struct {
-	ID        uint      `json:"id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"` // "direct" or "group"
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          uint      `json:"id"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"` // "direct" or "group"
+	UnreadCount int64     `json:"unread_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // DirectRoom represents a direct message conversation from the API.
@@ -605,4 +606,27 @@ func (c *Client) GetAvailableUsers(token string) ([]AvailableUser, error) {
 		return nil, err
 	}
 	return response.Data, nil
+}
+
+// MarkRoomAsRead marks all messages in a room as read.
+func (c *Client) MarkRoomAsRead(token string, roomID uint) error {
+	url := fmt.Sprintf("%s/api/v1/rooms/%d/read", c.BaseURL, roomID)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := c.handleErrorResponse(resp); err != nil {
+		return err
+	}
+
+	return nil
 }
