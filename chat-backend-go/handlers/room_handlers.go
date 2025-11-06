@@ -37,7 +37,7 @@ type DirectRoomResponse struct {
 	DisplayName string           `json:"display_name"`
 	OtherUser   OtherUserInfo    `json:"other_user"`
 	LastMessage *LastMessageInfo `json:"last_message,omitempty"`
-	UnreadCount int              `json:"unread_count"`
+	UnreadCount int64            `json:"unread_count"`
 	CreatedAt   time.Time        `json:"created_at"`
 }
 
@@ -97,7 +97,7 @@ func buildDirectRoomResponse(room models.Room, currentUserID uint, lastMsgMap ma
 			IsOnline:     otherUser.IsOnline,
 			LastActiveAt: otherUser.LastActiveAt,
 		},
-		UnreadCount: int(unreadCounts[room.ID]), // Get actual unread count from map
+		UnreadCount: unreadCounts[room.ID], // Get actual unread count from map (int64)
 		CreatedAt:   room.CreatedAt,
 	}
 
