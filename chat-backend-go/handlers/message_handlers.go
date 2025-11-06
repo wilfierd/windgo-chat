@@ -5,9 +5,11 @@ import (
 	"chat-backend-go/middleware"
 	"chat-backend-go/models"
 	"chat-backend-go/utils"
+	"errors"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 // SendMessage creates a new message in a room
@@ -313,7 +315,7 @@ func MarkRoomAsRead(c *fiber.Ctx) error {
 		First(&lastMessage).Error; err != nil {
 		// If there are no messages in the room, still return success
 		// No need to track last read for empty rooms
-		if err.Error() == "record not found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return c.JSON(fiber.Map{
 				"message": "Room marked as read",
 				"data": fiber.Map{

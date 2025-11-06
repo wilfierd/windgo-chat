@@ -152,11 +152,13 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - ✅ Endpoint: POST /api/v1/rooms/:id/read (mark as read)
   - ✅ CLI: Show unread count badges on rooms
 
-- [ ] **Room membership & permissions**
-  - Room membership table (user_id, room_id, role: member/admin/owner)
-  - Endpoint: POST /api/v1/rooms/:id/members (invite users)
-  - Endpoint: DELETE /api/v1/rooms/:id/members/:userId (kick/leave)
-  - Permission checks: Can user post to room? Can user see room?
+- [x] **Room membership & permissions** ✓
+  - ✅ Room membership table (user_id, room_id, role: member/admin/owner)
+  - ✅ Endpoint: POST /api/v1/rooms/:id/members (invite users)
+  - ✅ Endpoint: DELETE /api/v1/rooms/:id/members/:userId (kick/leave)
+  - ✅ Permission checks: Can user post to room? Can user see room?
+  - ✅ Role-based access control: member/admin/owner hierarchy
+  - ✅ Self-removal allowed, admins/owners can remove others with proper checks
 
 #### Medium Priority:
 
