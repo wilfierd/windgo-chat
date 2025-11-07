@@ -8,16 +8,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// GetUserID safely retrieves the userID from context
-func GetUserID(c *fiber.Ctx) (uint, bool) {
-	userID := c.Locals(string(UserIDKey))
-	if userID == nil {
-		return 0, false
-	}
-	id, ok := userID.(uint)
-	return id, ok
-}
-
 // TrackActivity updates the user's last_active_at timestamp on each request
 func TrackActivity() fiber.Handler {
 	return func(c *fiber.Ctx) error {
