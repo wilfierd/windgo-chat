@@ -102,6 +102,26 @@ BEGIN
     END IF;
 END $$;
 
+-- Insert room memberships (add all users to all group rooms)
+DO $$
+BEGIN
+    -- Check if required tables exist
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users') AND
+       EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'rooms') AND
+       EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'room_memberships') THEN
+        
+        -- Add all users to all group rooms (admin users get 'admin' role, others get 'member')
+        INSERT INTO room_memberships (user_id, room_id, role, joined_at, created_at, updated_at)
+        SELECT u.id, r.id, 
+            CASE WHEN u.role = 'admin' THEN 'admin' ELSE 'member' END,
+            NOW(), NOW(), NOW()
+        FROM users u
+        CROSS JOIN rooms r
+        WHERE r.type = 'group'
+        ON CONFLICT (user_id, room_id) DO NOTHING;
+    END IF;
+END $$;
+
 -- Create a function to check database health
 CREATE OR REPLACE FUNCTION check_db_health()
 RETURNS TABLE(
@@ -114,7 +134,9 @@ BEGIN
     UNION ALL
     SELECT 'rooms'::TEXT, COALESCE((SELECT COUNT(*) FROM rooms), 0)::BIGINT
     UNION ALL
-    SELECT 'messages'::TEXT, COALESCE((SELECT COUNT(*) FROM messages), 0)::BIGINT;
+    SELECT 'messages'::TEXT, COALESCE((SELECT COUNT(*) FROM messages), 0)::BIGINT
+    UNION ALL
+    SELECT 'room_memberships'::TEXT, COALESCE((SELECT COUNT(*) FROM room_memberships), 0)::BIGINT;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -128,6 +150,7 @@ DECLARE
     user_count INTEGER := 0;
     room_count INTEGER := 0;
     message_count INTEGER := 0;
+    membership_count INTEGER := 0;
 BEGIN
     -- Safely get counts
     IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users') THEN
@@ -142,12 +165,17 @@ BEGIN
         SELECT COUNT(*) INTO message_count FROM messages;
     END IF;
 
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'room_memberships') THEN
+        SELECT COUNT(*) INTO membership_count FROM room_memberships;
+    END IF;
+
     RAISE NOTICE '========================================';
     RAISE NOTICE 'WindGo Chat Database Initialized Successfully!';
     RAISE NOTICE '========================================';
     RAISE NOTICE 'Users created: %', user_count;
     RAISE NOTICE 'Rooms created: %', room_count;
     RAISE NOTICE 'Messages created: %', message_count;
+    RAISE NOTICE 'Room memberships created: %', membership_count;
     RAISE NOTICE '========================================';
     RAISE NOTICE 'Demo Accounts (password: admin123):';
     RAISE NOTICE 'Admin: admin@windgo.com';

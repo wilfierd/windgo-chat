@@ -1091,7 +1091,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					if !isDuplicate {
-						m.messages = append(m.messages, apiMsg)
+						m.messages = append([]api.Message{apiMsg}, m.messages...)
 						m.updateMessageViewport()
 					}
 
