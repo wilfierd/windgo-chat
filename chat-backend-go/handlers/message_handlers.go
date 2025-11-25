@@ -72,6 +72,29 @@ func SendMessage(c *fiber.Ctx) error {
 		// The message was created successfully
 	}
 
+	// Parse and store mentions
+	usernames := utils.ParseMentions(req.Content)
+	if len(usernames) > 0 {
+		// Validate mentioned usernames exist
+		mentionedUserIDs, err := utils.ValidateMentions(config.DB, usernames)
+		if err != nil {
+			// Log error but don't fail message creation
+			utils.LogError("Failed to validate mentions", err, map[string]interface{}{
+				"message_id": message.ID,
+				"usernames":  usernames,
+			})
+		} else if len(mentionedUserIDs) > 0 {
+			// Store mention records
+			if err := utils.StoreMentions(config.DB, message.ID, mentionedUserIDs); err != nil {
+				// Log error but don't fail message creation
+				utils.LogError("Failed to store mentions", err, map[string]interface{}{
+					"message_id": message.ID,
+					"user_ids":   mentionedUserIDs,
+				})
+			}
+		}
+	}
+
 	// Load user data and parent message for response
 	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "SendMessage - load message data")
@@ -234,6 +257,15 @@ func UpdateMessage(c *fiber.Ctx) error {
 		return utils.RespondInternalErrorWithLog(c, err, "UpdateMessage - save message")
 	}
 
+	// Update mention records to reflect content changes
+	if err := utils.UpdateMentions(config.DB, message.ID, req.Content); err != nil {
+		// Log error but don't fail message update
+		utils.LogError("Failed to update mentions", err, map[string]interface{}{
+			"message_id": message.ID,
+			"content":    req.Content,
+		})
+	}
+
 	// Reload with user data and parent message for response
 	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "UpdateMessage - load message data")
@@ -338,6 +370,84 @@ func MarkRoomAsRead(c *fiber.Ctx) error {
 			"room_id":              roomID,
 			"last_read_message_id": lastMessage.ID,
 			"unread_count":         0,
+		},
+	})
+}
+
+// GetMentions retrieves messages where the authenticated user was mentioned
+func GetMentions(c *fiber.Ctx) error {
+	// Get authenticated user ID from JWT context
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		return utils.RespondUnauthorized(c, "User not authenticated")
+	}
+
+	// Parse query parameters
+	page := c.QueryInt("page", 1)
+	if page < 1 {
+		page = 1
+	}
+
+	limit := c.QueryInt("limit", 50)
+	if limit > 100 {
+		limit = 100 // Max limit
+	}
+	if limit < 1 {
+		limit = 50
+	}
+
+	// Optional room_id filter
+	roomIDStr := c.Query("room_id")
+	var roomID *uint
+	if roomIDStr != "" {
+		parsedRoomID, err := strconv.ParseUint(roomIDStr, 10, 32)
+		if err != nil {
+			return utils.RespondBadRequest(c, "Invalid room_id parameter")
+		}
+		roomIDUint := uint(parsedRoomID)
+		roomID = &roomIDUint
+	}
+
+	offset := (page - 1) * limit
+
+	// Build query for message_mentions
+	query := config.DB.Model(&models.MessageMention{}).
+		Preload("Message.User").
+		Preload("Message.Room").
+		Preload("Message.ParentMessage.User").
+		Preload("MentionedUser").
+		Joins("JOIN messages ON messages.id = message_mentions.message_id").
+		Where("message_mentions.mentioned_user_id = ?", userID).
+		Where("messages.deleted_at IS NULL") // Filter out soft-deleted messages
+
+	// Apply room filter if provided
+	if roomID != nil {
+		query = query.Where("messages.room_id = ?", *roomID)
+	}
+
+	// Count total mentions for pagination
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "GetMentions - count mentions")
+	}
+
+	// Fetch mentions ordered by message creation time (newest first)
+	var mentions []models.MessageMention
+	if err := query.
+		Order("messages.created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&mentions).Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "GetMentions - fetch mentions")
+	}
+
+	return c.JSON(fiber.Map{
+		"mentions": mentions,
+		"pagination": fiber.Map{
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": (total + int64(limit) - 1) / int64(limit),
 		},
 	})
 }

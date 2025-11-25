@@ -6,71 +6,23 @@ import (
 	"chat-backend-go/handlers"
 	"chat-backend-go/middleware"
 	"chat-backend-go/models"
-	"chat-backend-go/utils"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
-// setupTestDB initializes a test database
-func setupTestDB(t *testing.T) *gorm.DB {
-	// Use environment variables or default to test database
-	dsn := "host=localhost user=postgres password=password dbname=windgo_chat_test port=5432 sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("Failed to connect to test database: %v", err)
-	}
 
-	// Auto migrate tables
-	err = db.AutoMigrate(&models.User{}, &models.Room{}, &models.Message{})
-	if err != nil {
-		t.Fatalf("Failed to migrate test database: %v", err)
-	}
-
-	return db
-}
-
-// cleanupTestDB clears all test data
-func cleanupTestDB(t *testing.T, db *gorm.DB) {
-	db.Exec("DELETE FROM messages")
-	db.Exec("DELETE FROM rooms")
-	db.Exec("DELETE FROM users")
-}
-
-// createTestUser creates a test user and returns the user and JWT token
-func createTestUser(t *testing.T, db *gorm.DB, role string) (*models.User, string) {
-	user := &models.User{
-		Username: "testuser_" + role,
-		Email:    "test_" + role + "@example.com",
-		Password: "$2a$10$xyz", // hashed password
-		Role:     role,
-	}
-
-	if err := db.Create(user).Error; err != nil {
-		t.Fatalf("Failed to create test user: %v", err)
-	}
-
-	// Generate JWT token
-	token, err := utils.GenerateJWT(user.ID)
-	if err != nil {
-		t.Fatalf("Failed to generate JWT token: %v", err)
-	}
-
-	return user, token
-}
 
 // TestCreateRoom_AsAdmin tests room creation by admin user
 func TestCreateRoom_AsAdmin(t *testing.T) {
 	// Setup
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+	db := setupTestDBShared(t)
+	defer cleanupTestDBShared(t, db)
 	config.DB = db
 
-	adminUser, adminToken := createTestUser(t, db, "admin")
+	adminUser, adminToken := createTestUserShared(t, db, "testuser_admin", "test_admin@example.com", "admin")
 
 	app := fiber.New()
 	app.Post("/rooms", middleware.AuthRequired(), handlers.CreateRoom)
@@ -115,11 +67,11 @@ func TestCreateRoom_AsAdmin(t *testing.T) {
 // TestCreateRoom_AsNonAdmin tests that non-admin users cannot create rooms
 func TestCreateRoom_AsNonAdmin(t *testing.T) {
 	// Setup
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+	db := setupTestDBShared(t)
+	defer cleanupTestDBShared(t, db)
 	config.DB = db
 
-	regularUser, regularToken := createTestUser(t, db, "user")
+	regularUser, regularToken := createTestUserShared(t, db, "testuser_user", "test_user@example.com", "user")
 
 	app := fiber.New()
 	app.Post("/rooms", middleware.AuthRequired(), handlers.CreateRoom)
@@ -158,11 +110,11 @@ func TestCreateRoom_AsNonAdmin(t *testing.T) {
 // TestUpdateRoom_AsAdmin tests room update by admin
 func TestUpdateRoom_AsAdmin(t *testing.T) {
 	// Setup
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+	db := setupTestDBShared(t)
+	defer cleanupTestDBShared(t, db)
 	config.DB = db
 
-	adminUser, adminToken := createTestUser(t, db, "admin")
+	adminUser, adminToken := createTestUserShared(t, db, "testuser_admin", "test_admin@example.com", "admin")
 
 	// Create a room first
 	room := &models.Room{Name: "Original Room"}
@@ -210,11 +162,11 @@ func TestUpdateRoom_AsAdmin(t *testing.T) {
 // TestDeleteRoom_AsAdmin tests room deletion by admin (soft delete)
 func TestDeleteRoom_AsAdmin(t *testing.T) {
 	// Setup
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+	db := setupTestDBShared(t)
+	defer cleanupTestDBShared(t, db)
 	config.DB = db
 
-	adminUser, adminToken := createTestUser(t, db, "admin")
+	adminUser, adminToken := createTestUserShared(t, db, "testuser_admin", "test_admin@example.com", "admin")
 
 	// Create a room first
 	room := &models.Room{Name: "Room to Delete"}
@@ -261,8 +213,8 @@ func TestDeleteRoom_AsAdmin(t *testing.T) {
 // TestGetRoomByID tests retrieving a room by ID
 func TestGetRoomByID(t *testing.T) {
 	// Setup
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+	db := setupTestDBShared(t)
+	defer cleanupTestDBShared(t, db)
 	config.DB = db
 
 	// Create a room
@@ -301,11 +253,11 @@ func TestGetRoomByID(t *testing.T) {
 // TestCreateRoom_EmptyName tests validation for empty room name
 func TestCreateRoom_EmptyName(t *testing.T) {
 	// Setup
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+	db := setupTestDBShared(t)
+	defer cleanupTestDBShared(t, db)
 	config.DB = db
 
-	_, adminToken := createTestUser(t, db, "admin")
+	_, adminToken := createTestUserShared(t, db, "testuser_admin", "test_admin@example.com", "admin")
 
 	app := fiber.New()
 	app.Post("/rooms", middleware.AuthRequired(), handlers.CreateRoom)

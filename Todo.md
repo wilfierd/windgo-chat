@@ -167,7 +167,6 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - New table: message_reactions (message_id, user_id, emoji, created_at)
   - Endpoint: POST /api/v1/messages/:id/reactions
   - WebSocket: Broadcast reaction events
-  - CLI: Show reactions under messages, add with keyboard shortcut
 
 - [ ] **Rate limiting** - Prevent spam
 
@@ -178,7 +177,6 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] **Cursor-based pagination** - Better pagination for active chats
   - Add cursor parameter: GET /api/v1/rooms/:id/messages?cursor=messageID&limit=50
   - Return next_cursor and prev_cursor in response
-  - CLI: "Load older messages" when scrolling to top
 
 ---
 
@@ -194,12 +192,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
     - POST /api/v1/files/offer (sender initiates transfer)
     - GET /api/v1/files/:id/accept (receiver accepts)
     - WebSocket: file transfer events and progress
-  - CLI features:
-    - /send-file command with local file path
-    - File receive confirmation dialog
-    - Progress bar during transfer
-    - Automatic cleanup after download
-    - No persistent storage of decrypted files on server
+  - No persistent storage of decrypted files on server
   - Security features:
     - Password-protected file transfers (optional)
     - One-time download links (file deleted after retrieval)
@@ -211,25 +204,16 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - Parse @username in message content
   - Store mentions: message_mentions table (message_id, mentioned_user_id)
   - Endpoint: GET /api/v1/mentions (get messages mentioning me)
-  - CLI: Autocomplete usernames, highlight mentions
 
 - [ ] **Message search** - Search message history
 
   - Endpoint: GET /api/v1/search?q=query&room_id=1
   - PostgreSQL full-text search or Elasticsearch
-  - CLI: /search command or Ctrl+F shortcut
 
 - [ ] **Read receipts** - See who read messages
 
   - Track: user_message_reads (user_id, message_id, read_at)
   - Endpoint: GET /api/v1/messages/:id/reads
-  - CLI: Show "Seen by" under messages
-
-- [ ] **CLI notifications** - Notify users of new messages/mentions
-  - WebSocket notification events for mentions/DMs
-  - CLI: Desktop notifications (beeep library or system notifications)
-  - Terminal bell/alert on mentions
-  - Notification sound toggle option
 
 ---
 
@@ -261,22 +245,15 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ### **PHASE 5: Advanced Features** (Week 9+)
 
-- [ ] **Message threading UI improvements** - Better thread visualization
-
-  - Nested thread view in CLI
-  - Thread summary/preview
-  - Unread count per thread
-
 - [ ] **Room categories/tags** - Organize rooms
 
   - Room.category field (e.g., "work", "social", "announcements")
-  - Filter rooms by category in CLI
+  - Filter rooms by category
 
-- [ ] **User profiles** - CLI-focused user profiles
+- [ ] **User profiles** - Enhanced user profiles
 
   - Bio, status message, timezone, public key (for secure file transfers)
   - Endpoint: GET /api/v1/users/:id, PUT /api/v1/users/me
-  - CLI: View profile command
 
 - [ ] **Audit logging** - Track admin actions
 
@@ -287,7 +264,6 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] **Room restore/undelete** - Recover deleted rooms
 
   - Endpoint: POST /api/v1/admin/rooms/:id/restore
-  - CLI: Admin can view and restore deleted rooms
 
 - [ ] **Bulk admin operations**
 
@@ -303,7 +279,6 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] **Message formatting** - Rich text support
   - Markdown rendering (bold, italic, code blocks, links)
   - Syntax highlighting for code blocks
-  - CLI: Render markdown with Glamour library
 
 ---
 
@@ -323,10 +298,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] WebSocket integration tests (connect, join room, send/receive)
 - [ ] Database integration tests (use test DB)
 
-### CLI Tests
 
-- [ ] Business logic tests (separate from UI)
-- [ ] End-to-end CLI tests (simulate user input, check output)
 
 ### Load Tests
 
@@ -353,13 +325,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - [ ] Database migration tool (golang-migrate)
 - [ ] Secrets management (Vault, AWS Secrets Manager)
 
-### CLI Distribution
 
-- [ ] GitHub Releases with compiled binaries
-- [ ] Homebrew formula (Mac)
-- [ ] Debian/RPM packages (Linux)
-- [ ] Chocolatey package (Windows)
-- [ ] Auto-update mechanism
 
 ---
 
@@ -399,14 +365,11 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ## 🎨 Future Ideas (Brainstorm)
 
-- **CLI-Focused Features:**
-  - Bots/integrations (CLI scripts, webhooks)
+- **Backend Features:**
+  - Bots/integrations (webhooks, API integrations)
   - Message pinning
   - Scheduled messages
-  - Dark/light theme for CLI
-  - Custom keybindings
   - Export chat logs (encrypted backup)
-  - Vim/Emacs keybinding modes
 - **Advanced Security:**
   - End-to-end encryption (Signal protocol)
   - Multi-server federation (Matrix-like)
@@ -415,9 +378,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - Encrypted file vault (personal storage)
 - **Developer Tools:**
   - Code snippet sharing with syntax highlighting
-  - Terminal output sharing
   - Git integration (share commits, diffs)
-  - Command history sharing
 
 ---
 
