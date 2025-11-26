@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"chat-backend-go/middleware"
+	"chat-backend-go/models"
 	ws "chat-backend-go/websocket"
 	"fmt"
 	"log"
@@ -132,4 +133,67 @@ func GetRoomStats(c *fiber.Ctx) error {
 		"room_id":        roomID,
 		"active_clients": clientCount,
 	})
+}
+
+// BroadcastMentionNotifications sends individual mention notifications to mentioned users
+// Filters out self-mentions and verifies room membership before sending
+func BroadcastMentionNotifications(message interface{}, mentionedUserIDs []uint) {
+	if Hub == nil {
+		log.Println("WebSocket hub not initialized, skipping mention notifications")
+		return
+	}
+
+	// Extract message details for filtering and notification
+	var messageID uint
+	var roomID uint
+	var authorID uint
+
+	// Type assert to get message details
+	switch msg := message.(type) {
+	case models.Message:
+		messageID = msg.ID
+		roomID = msg.RoomID
+		authorID = msg.UserID
+	default:
+		log.Printf("Invalid message type for mention notifications: %T", message)
+		return
+	}
+
+	// Filter out self-mentions and send notifications
+	for _, mentionedUserID := range mentionedUserIDs {
+		// Skip self-mentions
+		if mentionedUserID == authorID {
+			log.Printf("Skipping self-mention for user %d in message %d", mentionedUserID, messageID)
+			continue
+		}
+
+		// Verify room membership
+		if !Hub.IsRoomMember(mentionedUserID, roomID) {
+			log.Printf("User %d is not a member of room %d, skipping mention notification", mentionedUserID, roomID)
+			continue
+		}
+
+		// Send individual mention notification to the mentioned user
+		go sendMentionNotification(mentionedUserID, roomID, message)
+	}
+}
+
+// sendMentionNotification sends a mention notification to a specific user
+func sendMentionNotification(userID uint, roomID uint, message interface{}) {
+	if Hub == nil {
+		return
+	}
+
+	// Create mention notification message
+	notification := &ws.Message{
+		Type:    "mention",
+		RoomID:  roomID,
+		UserID:  userID,
+		Content: map[string]interface{}{
+			"message": message,
+		},
+	}
+
+	// Send to specific user via Hub
+	Hub.SendToUser(userID, notification)
 }

@@ -351,3 +351,41 @@ func (h *Hub) InvalidateAllMembershipCache() {
 	h.membershipCache = make(map[uint]map[uint]bool)
 	log.Printf("All membership cache invalidated")
 }
+
+// IsRoomMember checks if a user is a member of a room (public method)
+func (h *Hub) IsRoomMember(userID uint, roomID uint) bool {
+	return h.isRoomMember(userID, roomID)
+}
+
+// SendToUser sends a message to a specific user across all their connected clients
+func (h *Hub) SendToUser(userID uint, message *Message) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	// Marshal message to JSON once
+	data, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Error marshaling message for user %d: %v", userID, err)
+		return
+	}
+
+	// Find all clients for this user and send the message
+	sentCount := 0
+	for _, client := range h.clients {
+		if client.UserID == userID {
+			select {
+			case client.Send <- data:
+				sentCount++
+			default:
+				// Client's send buffer is full, log but continue
+				log.Printf("Client %s send buffer full, dropping mention notification", client.ID)
+			}
+		}
+	}
+
+	if sentCount > 0 {
+		log.Printf("Sent mention notification to user %d (%d clients)", userID, sentCount)
+	} else {
+		log.Printf("User %d has no connected clients, mention notification not sent", userID)
+	}
+}

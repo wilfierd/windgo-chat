@@ -73,17 +73,19 @@ func SendMessage(c *fiber.Ctx) error {
 	}
 
 	// Parse and store mentions
+	var mentionedUserIDs []uint
 	usernames := utils.ParseMentions(req.Content)
 	if len(usernames) > 0 {
 		// Validate mentioned usernames exist
-		mentionedUserIDs, err := utils.ValidateMentions(config.DB, usernames)
+		validatedUserIDs, err := utils.ValidateMentions(config.DB, usernames)
 		if err != nil {
 			// Log error but don't fail message creation
 			utils.LogError("Failed to validate mentions", err, map[string]interface{}{
 				"message_id": message.ID,
 				"usernames":  usernames,
 			})
-		} else if len(mentionedUserIDs) > 0 {
+		} else if len(validatedUserIDs) > 0 {
+			mentionedUserIDs = validatedUserIDs
 			// Store mention records
 			if err := utils.StoreMentions(config.DB, message.ID, mentionedUserIDs); err != nil {
 				// Log error but don't fail message creation
@@ -102,6 +104,11 @@ func SendMessage(c *fiber.Ctx) error {
 
 	// Broadcast message to WebSocket clients in the room
 	BroadcastMessage(message.RoomID, "message", message, message.UserID)
+
+	// Send mention notifications to mentioned users
+	if len(mentionedUserIDs) > 0 {
+		BroadcastMentionNotifications(message, mentionedUserIDs)
+	}
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Message sent successfully",
