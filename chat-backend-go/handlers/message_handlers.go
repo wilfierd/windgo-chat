@@ -284,7 +284,7 @@ func UpdateMessage(c *fiber.Ctx) error {
 	})
 }
 
-// DeleteMessage soft deletes a message
+// DeleteMessage soft deletes a message and its associated mentions
 func DeleteMessage(c *fiber.Ctx) error {
 	// Get user ID from JWT middleware (type-safe)
 	userID, ok := middleware.GetUserID(c)
@@ -310,8 +310,43 @@ func DeleteMessage(c *fiber.Ctx) error {
 		return utils.RespondForbidden(c, "You can only delete your own messages")
 	}
 
-	// Soft delete the message
-	if err := config.DB.Delete(&message).Error; err != nil {
+	// Use transaction to ensure atomicity of message and mention deletion
+	err = config.DB.Transaction(func(tx *gorm.DB) error {
+		// Count mentions before deletion for logging
+		var mentionCount int64
+		if err := tx.Model(&models.MessageMention{}).Where("message_id = ?", messageID).Count(&mentionCount).Error; err != nil {
+			utils.LogError("Failed to count mentions before cascade delete", err, map[string]interface{}{
+				"message_id": messageID,
+			})
+			// Continue with deletion even if count fails
+		}
+
+		// Soft delete associated mentions (cascade delete for soft deletes)
+		if err := tx.Where("message_id = ?", messageID).Delete(&models.MessageMention{}).Error; err != nil {
+			utils.LogError("Failed to cascade delete mentions", err, map[string]interface{}{
+				"message_id": messageID,
+			})
+			return err
+		}
+
+		// Log cascade delete
+		if mentionCount > 0 {
+			utils.LogInfo("Cascade deleted mentions for message", map[string]interface{}{
+				"message_id":    messageID,
+				"mention_count": mentionCount,
+				"user_id":       userID,
+			})
+		}
+
+		// Soft delete the message
+		if err := tx.Delete(&message).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "DeleteMessage - delete message")
 	}
 
