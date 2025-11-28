@@ -23,6 +23,13 @@ func main() {
 	config.ConnectDB()
 	utils.Logger.Info("Database connected successfully")
 
+	// Initialize search
+	if err := config.InitSearch(); err != nil {
+		utils.Logger.Warn("Search initialization failed, continuing without search functionality", "error", err)
+	} else {
+		utils.Logger.Info("Search service connected successfully")
+	}
+
 	// Seed demo users and rooms
 	utils.SeedDemoUsers()
 	utils.SeedDemoRooms()
@@ -88,6 +95,7 @@ func main() {
 	routes.SetupAuthRoutes(app)
 	routes.UserRoutes(app)
 	routes.MessageRoutes(app)
+	routes.SearchRoutes(app)
 	routes.SetupWebSocketRoutes(app)
 	log.Println("All routes registered including WebSocket")
 

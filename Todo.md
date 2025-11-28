@@ -199,11 +199,14 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
     - Transfer expiration (24h default, configurable)
     - File size limits (100MB for CLI focus)
 
-- [ ] **User mentions (@username)** - Mention users in messages
+- [x] **User mentions (@username)** - Mention users in messages ✓
 
-  - Parse @username in message content
-  - Store mentions: message_mentions table (message_id, mentioned_user_id)
-  - Endpoint: GET /api/v1/mentions (get messages mentioning me)
+  - ✅ Parse @username in message content
+  - ✅ Store mentions: message_mentions table (message_id, mentioned_user_id)
+  - ✅ Endpoint: GET /api/v1/mentions (get messages mentioning me)
+  - ✅ WebSocket notifications for mentioned users
+  - ✅ Cascade delete mentions when message is deleted
+  - 📝 See `docs/USER_MENTIONS.md` for documentation
 
 - [ ] **Message search** - Search message history
 

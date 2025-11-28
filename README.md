@@ -7,8 +7,20 @@
   <img src="https://img.shields.io/badge/Docker-Optional-2496ED?logo=docker">
 </p>
 
-A modern real-time chat application featuring authentication, user profiles, and chat rooms.
+A modern real-time chat application featuring authentication, user profiles, chat rooms, direct messaging, and user mentions.
 Built with Go for the backend. The web frontend has moved to a separate repository, and this repo is moving toward a CLI-based chat client.
+
+## Features
+
+- **Authentication**: JWT-based auth with GitHub OAuth support
+- **Real-time messaging**: WebSocket-powered instant message delivery
+- **Chat rooms**: Group chat rooms with admin management
+- **Direct messaging**: Private 1-on-1 conversations
+- **User mentions**: @username mentions with real-time notifications
+- **Message search**: Full-text search powered by Meilisearch with <100ms response times
+- **Message threading**: Reply to specific messages
+- **Message editing/deletion**: Edit or soft-delete your own messages
+- **Unread tracking**: Track unread message counts per room
 
 > Notice: Frontend moved to its own repo
 >
@@ -40,16 +52,44 @@ The backend will start on `http://localhost:8080`.
 
 #### Database Initialization
 
-- The backend uses a SQL database.
+- The backend uses PostgreSQL for data storage and Meilisearch for message search.
 - To initialize, run the SQL script:
   ```bash
   psql -U <username> -d <database> -f init.sql
   ```
 - Update `config/database.go` with your DB credentials.
 
-#### Docker Setup (Optional)
+#### Environment Variables
 
-To run backend and database with Docker:
+Create a `.env` file in `chat-backend-go/` (see `.env.example`):
+
+```env
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=password
+DB_NAME=windgo_chat
+
+# JWT
+JWT_SECRET=change-me-in-production
+
+# Search (optional - gracefully degrades if unavailable)
+MEILISEARCH_HOST=http://localhost:7700
+MEILISEARCH_API_KEY=
+```
+
+#### Docker Setup (Recommended)
+
+To run backend, database, and search engine with Docker:
 ```bash
+cd chat-backend-go
 docker-compose up
 ```
+
+This starts:
+- PostgreSQL on port 5432
+- Meilisearch on port 7700
+- Adminer (DB admin UI) on port 8081
+
+**Note**: The backend gracefully handles Meilisearch being unavailable - message operations continue normally, but search functionality returns a 503 error.

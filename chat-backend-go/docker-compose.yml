@@ -29,5 +29,23 @@ services:
       - postgres
     restart: unless-stopped
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: windgo-chat-meilisearch
+    environment:
+      MEILI_ENV: development
+      MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-}
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 volumes:
   postgres_data:
+  meilisearch_data:

@@ -102,6 +102,17 @@ func SendMessage(c *fiber.Ctx) error {
 		return utils.RespondInternalErrorWithLog(c, err, "SendMessage - load message data")
 	}
 
+	// Index message in search engine (non-blocking)
+	if config.SearchClient != nil {
+		if err := config.SearchClient.IndexMessage(&message); err != nil {
+			// Log error but don't fail message creation
+			utils.LogError("Failed to index message in search", err, map[string]interface{}{
+				"message_id": message.ID,
+				"room_id":    message.RoomID,
+			})
+		}
+	}
+
 	// Broadcast message to WebSocket clients in the room
 	BroadcastMessage(message.RoomID, "message", message, message.UserID)
 
@@ -278,6 +289,17 @@ func UpdateMessage(c *fiber.Ctx) error {
 		return utils.RespondInternalErrorWithLog(c, err, "UpdateMessage - load message data")
 	}
 
+	// Re-index message in search engine (non-blocking)
+	if config.SearchClient != nil {
+		if err := config.SearchClient.IndexMessage(&message); err != nil {
+			// Log error but don't fail message update
+			utils.LogError("Failed to re-index message in search", err, map[string]interface{}{
+				"message_id": message.ID,
+				"room_id":    message.RoomID,
+			})
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"message": "Message updated successfully",
 		"data":    message,
@@ -348,6 +370,16 @@ func DeleteMessage(c *fiber.Ctx) error {
 
 	if err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "DeleteMessage - delete message")
+	}
+
+	// Remove message from search index (non-blocking)
+	if config.SearchClient != nil {
+		if err := config.SearchClient.RemoveMessage(uint(messageID)); err != nil {
+			// Log error but don't fail message deletion
+			utils.LogError("Failed to remove message from search index", err, map[string]interface{}{
+				"message_id": messageID,
+			})
+		}
 	}
 
 	return c.JSON(fiber.Map{
