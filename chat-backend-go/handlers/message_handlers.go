@@ -97,8 +97,8 @@ func SendMessage(c *fiber.Ctx) error {
 		}
 	}
 
-	// Load user data and parent message for response
-	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
+	// Load user data, room, and parent message for response and search indexing
+	if err := config.DB.Preload("User").Preload("Room").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "SendMessage - load message data")
 	}
 
@@ -284,8 +284,8 @@ func UpdateMessage(c *fiber.Ctx) error {
 		})
 	}
 
-	// Reload with user data and parent message for response
-	if err := config.DB.Preload("User").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
+	// Reload with user data, room, and parent message for response and search indexing
+	if err := config.DB.Preload("User").Preload("Room").Preload("ParentMessage.User").First(&message, message.ID).Error; err != nil {
 		return utils.RespondInternalErrorWithLog(c, err, "UpdateMessage - load message data")
 	}
 
