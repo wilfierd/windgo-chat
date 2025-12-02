@@ -257,57 +257,78 @@ func (m *MeilisearchClient) GetNavigationContext(query string, roomIDs []uint, m
 		filter = strings.Join(roomFilters, " OR ")
 	}
 
-	// Search for all matching messages to find position
-	searchReq := &meilisearch.SearchRequest{
-		Limit: 1000, // Get enough results to find position
+	// First, get total count with a minimal search
+	countReq := &meilisearch.SearchRequest{
+		Limit: 1,
 		Sort:  []string{"created_at:desc"},
 	}
-
 	if filter != "" {
-		searchReq.Filter = filter
+		countReq.Filter = filter
 	}
 
-	result, err := m.index.Search(query, searchReq)
+	countResult, err := m.index.Search(query, countReq)
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	// Find the message position
-	var currentIndex int
-	var prevID, nextID *uint
-	totalMatches := len(result.Hits)
+	totalMatches := int(countResult.EstimatedTotalHits)
+	if totalMatches == 0 {
+		return nil, fmt.Errorf("no search results found")
+	}
 
-	for i, hit := range result.Hits {
+	// Binary search to find the message position efficiently
+	currentIndex := m.findMessagePosition(query, filter, messageID, totalMatches)
+	if currentIndex == 0 {
+		return nil, fmt.Errorf("message not found in search results")
+	}
+
+	// Fetch a small window around the message to get prev/next IDs
+	// Fetch 3 results: the message before, the target message, and the message after
+	windowOffset := currentIndex - 2 // Start one before the target (0-indexed)
+	if windowOffset < 0 {
+		windowOffset = 0
+	}
+
+	windowReq := &meilisearch.SearchRequest{
+		Offset: int64(windowOffset),
+		Limit:  3,
+		Sort:   []string{"created_at:desc"},
+	}
+	if filter != "" {
+		windowReq.Filter = filter
+	}
+
+	windowResult, err := m.index.Search(query, windowReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch navigation window: %w", err)
+	}
+
+	// Extract prev/next IDs from the window
+	var prevID, nextID *uint
+	for i, hit := range windowResult.Hits {
 		var doc MessageDocument
 		if err := hit.DecodeInto(&doc); err != nil {
 			continue
 		}
 
 		if doc.ID == messageID {
-			currentIndex = i + 1 // 1-based index
-
 			// Get previous message ID (earlier in results = newer message)
 			if i > 0 {
 				var prevDoc MessageDocument
-				if err := result.Hits[i-1].DecodeInto(&prevDoc); err == nil {
+				if err := windowResult.Hits[i-1].DecodeInto(&prevDoc); err == nil {
 					prevID = &prevDoc.ID
 				}
 			}
 
 			// Get next message ID (later in results = older message)
-			if i < len(result.Hits)-1 {
+			if i < len(windowResult.Hits)-1 {
 				var nextDoc MessageDocument
-				if err := result.Hits[i+1].DecodeInto(&nextDoc); err == nil {
+				if err := windowResult.Hits[i+1].DecodeInto(&nextDoc); err == nil {
 					nextID = &nextDoc.ID
 				}
 			}
-
 			break
 		}
-	}
-
-	if currentIndex == 0 {
-		return nil, fmt.Errorf("message not found in search results")
 	}
 
 	return &NavigationContext{
@@ -317,4 +338,113 @@ func (m *MeilisearchClient) GetNavigationContext(query string, roomIDs []uint, m
 		NextID:       nextID,
 		Query:        query,
 	}, nil
+}
+
+// findMessagePosition uses binary search to efficiently find a message's position in search results
+// Returns 1-based index, or 0 if not found
+func (m *MeilisearchClient) findMessagePosition(query, filter string, messageID uint, totalMatches int) int {
+	left, right := 0, totalMatches-1
+	batchSize := int64(50) // Fetch in batches during binary search
+
+	for left <= right {
+		mid := (left + right) / 2
+
+		// Fetch a batch around the midpoint
+		offset := mid
+		if offset < 0 {
+			offset = 0
+		}
+
+		searchReq := &meilisearch.SearchRequest{
+			Offset: int64(offset),
+			Limit:  batchSize,
+			Sort:   []string{"created_at:desc"},
+		}
+		if filter != "" {
+			searchReq.Filter = filter
+		}
+
+		result, err := m.index.Search(query, searchReq)
+		if err != nil {
+			return 0
+		}
+
+		// Check if message is in this batch
+		for i, hit := range result.Hits {
+			var doc MessageDocument
+			if err := hit.DecodeInto(&doc); err != nil {
+				continue
+			}
+
+			if doc.ID == messageID {
+				return int(offset) + i + 1 // 1-based index
+			}
+		}
+
+		// If we didn't find it, determine which half to search
+		// Since we can't easily compare without fetching, we'll do a linear scan
+		// For now, fall back to a simpler approach: fetch in chunks
+		if len(result.Hits) == 0 {
+			break
+		}
+
+		// Get the first and last IDs in this batch to determine direction
+		var firstDoc, lastDoc MessageDocument
+		if err := result.Hits[0].DecodeInto(&firstDoc); err == nil {
+			if messageID > firstDoc.ID {
+				// Message is before this batch (newer)
+				right = mid - 1
+			} else if len(result.Hits) > 0 {
+				if err := result.Hits[len(result.Hits)-1].DecodeInto(&lastDoc); err == nil {
+					if messageID < lastDoc.ID {
+						// Message is after this batch (older)
+						left = mid + int(batchSize)
+					} else {
+						// Should be in this batch but wasn't found
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// If binary search didn't find it, fall back to linear scan in chunks
+	return m.linearScanPosition(query, filter, messageID, totalMatches)
+}
+
+// linearScanPosition scans through results in chunks to find message position
+func (m *MeilisearchClient) linearScanPosition(query, filter string, messageID uint, totalMatches int) int {
+	batchSize := int64(100)
+	for offset := int64(0); offset < int64(totalMatches); offset += batchSize {
+		searchReq := &meilisearch.SearchRequest{
+			Offset: offset,
+			Limit:  batchSize,
+			Sort:   []string{"created_at:desc"},
+		}
+		if filter != "" {
+			searchReq.Filter = filter
+		}
+
+		result, err := m.index.Search(query, searchReq)
+		if err != nil {
+			return 0
+		}
+
+		for i, hit := range result.Hits {
+			var doc MessageDocument
+			if err := hit.DecodeInto(&doc); err != nil {
+				continue
+			}
+
+			if doc.ID == messageID {
+				return int(offset) + i + 1 // 1-based index
+			}
+		}
+
+		if int64(len(result.Hits)) < batchSize {
+			break // No more results
+		}
+	}
+
+	return 0 // Not found
 }
