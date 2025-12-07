@@ -73,7 +73,17 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ Demo data seeding
 - ✅ Activity tracking middleware
 
-### 7. **Documentation** ✓
+### 7. **Message Search (Meilisearch)** ✓
+
+- ✅ Full-text search with Meilisearch integration
+- ✅ Search endpoint: GET /api/v1/search with query, room_id filter, cursor pagination
+- ✅ Navigation context endpoint: GET /api/v1/search/navigate/:messageId
+- ✅ Automatic message indexing on create/update/delete
+- ✅ Searchable fields: content, username, room_name
+- ✅ Filterable by room_id, user_id; sortable by created_at
+- ✅ Graceful degradation (503 if Meilisearch unavailable)
+
+### 8. **Documentation** ✓
 
 - ✅ CLAUDE.md - Comprehensive project guide
 - ✅ MESSAGE_THREADING.md - Threading implementation docs
@@ -81,8 +91,9 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 - ✅ ROOM_MANAGEMENT.md - Room admin guide
 - ✅ ROOM_MANAGEMENT_QUICKSTART.md - Quick reference
 - ✅ UI_FLOW_VISUAL.md - Visual UI flow guide
+- ✅ USER_MENTIONS.md - User mention system docs
 
-### 8. **CI/CD & DevOps** ✓
+### 9. **CI/CD & DevOps** ✓
 
 - ✅ GitHub Actions workflow
 - ✅ Discord notifications for builds
@@ -168,15 +179,17 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - Endpoint: POST /api/v1/messages/:id/reactions
   - WebSocket: Broadcast reaction events
 
-- [ ] **Rate limiting** - Prevent spam
+- [x] **Rate limiting** - Prevent spam ✓
 
-  - Use golang.org/x/time/rate or github.com/ulule/limiter
-  - Per-user rate limits: 10 messages/minute, 60 requests/minute
-  - Return 429 Too Many Requests with Retry-After header
+  - ✅ Implemented via nginx reverse proxy (`nginx.conf.example`)
+  - ✅ Per-IP rate limits: 10 messages/minute, 60 requests/minute for general API
+  - ✅ Auth endpoints: 5 requests/minute with burst of 3
+  - ✅ Returns 429 Too Many Requests with JSON error response
 
-- [ ] **Cursor-based pagination** - Better pagination for active chats
-  - Add cursor parameter: GET /api/v1/rooms/:id/messages?cursor=messageID&limit=50
-  - Return next_cursor and prev_cursor in response
+- [x] **Cursor-based pagination** - Better pagination for active chats ✓
+  - ✅ Cursor parameter: GET /api/v1/rooms/:id/messages?cursor=messageID&limit=50
+  - ✅ Returns next_cursor and prev_cursor in response
+  - ✅ Base64-encoded timestamp cursors for stable pagination
 
 ---
 
@@ -208,10 +221,14 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - ✅ Cascade delete mentions when message is deleted
   - 📝 See `docs/USER_MENTIONS.md` for documentation
 
-- [ ] **Message search** - Search message history
+- [x] **Message search** - Search message history ✓
 
-  - Endpoint: GET /api/v1/search?q=query&room_id=1
-  - PostgreSQL full-text search or Elasticsearch
+  - ✅ Endpoint: GET /api/v1/search?q=query&room_id=1&cursor=...&limit=20
+  - ✅ Powered by Meilisearch for <100ms response times
+  - ✅ Navigation context: GET /api/v1/search/navigate/:messageId
+  - ✅ Cursor-based pagination with next_cursor and has_more
+  - ✅ Automatic indexing on create/update/delete
+  - ✅ Graceful degradation when Meilisearch unavailable
 
 - [ ] **Read receipts** - See who read messages
 
@@ -355,7 +372,7 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 
 ### Standard Security:
 
-- [ ] Rate limiting (API & WebSocket)
+- [x] Rate limiting (API & WebSocket) - ✅ Implemented via nginx
 - [ ] Input sanitization (prevent injection attacks)
 - [ ] SQL injection prevention audit (GORM should handle, but verify)
 - [ ] CSRF protection for web OAuth flow
@@ -414,11 +431,13 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
 ### 🎯 Next Sprint Goals (Week 1-2):
 
 1. ✅ **Direct Messaging spec completed** - Ready for implementation
-2. Implement Direct Messaging feature (see `.kiro/specs/direct-messaging/tasks.md`)
-3. Add comprehensive testing (unit + integration)
-4. Add rate limiting
-5. Improve error messages in CLI
-6. Add server-side input validation
+2. ✅ **Rate limiting** - Implemented via nginx reverse proxy
+3. ✅ **Message search** - Meilisearch integration complete
+4. ✅ **Cursor-based pagination** - Implemented for messages endpoint
+5. Implement Direct Messaging feature (see `.kiro/specs/direct-messaging/tasks.md`)
+6. Add comprehensive testing (unit + integration)
+7. Improve error messages in CLI
+8. Add server-side input validation
 
 ---
 

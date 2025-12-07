@@ -5,8 +5,11 @@ import (
 	"chat-backend-go/middleware"
 	"chat-backend-go/models"
 	"chat-backend-go/utils"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -128,6 +131,12 @@ func SendMessage(c *fiber.Ctx) error {
 }
 
 // GetMessages retrieves messages for a specific room
+// Supports both cursor-based pagination (preferred) and legacy offset-based pagination
+// Query params:
+//   - cursor: Base64-encoded timestamp for cursor-based pagination (preferred)
+//   - direction: "older" (default) or "newer" - direction to fetch messages from cursor
+//   - limit: Number of messages to return (default 50, max 100)
+//   - page: Legacy offset-based pagination (deprecated, use cursor instead)
 func GetMessages(c *fiber.Ctx) error {
 	// Get authenticated user ID from context
 	userID, ok := middleware.GetUserID(c)
@@ -153,10 +162,26 @@ func GetMessages(c *fiber.Ctx) error {
 	}
 
 	// Get pagination parameters
-	page := c.QueryInt("page", 1)
 	limit := c.QueryInt("limit", 50)
 	if limit > 100 {
 		limit = 100 // Max limit
+	}
+	if limit < 1 {
+		limit = 50
+	}
+
+	cursor := c.Query("cursor", "")
+	direction := c.Query("direction", "older")
+
+	// Check if using cursor-based pagination
+	if cursor != "" {
+		return getMessagesWithCursor(c, uint(roomID), cursor, direction, limit)
+	}
+
+	// Legacy offset-based pagination (for backward compatibility)
+	page := c.QueryInt("page", 1)
+	if page < 1 {
+		page = 1
 	}
 	offset := (page - 1) * limit
 
@@ -186,6 +211,112 @@ func GetMessages(c *fiber.Ctx) error {
 			"totalPages": (total + int64(limit) - 1) / int64(limit),
 		},
 	})
+}
+
+// getMessagesWithCursor handles cursor-based pagination for messages
+// Cursor format: Base64-encoded "messageID:timestamp" (e.g., "MTIzOjE3MDk1NjE2MDA=")
+func getMessagesWithCursor(c *fiber.Ctx, roomID uint, cursor string, direction string, limit int) error {
+	var cursorMessageID uint
+	var cursorTimestamp time.Time
+
+	// Decode cursor
+	if cursor != "" {
+		decoded, err := base64.StdEncoding.DecodeString(cursor)
+		if err != nil {
+			return utils.RespondBadRequest(c, "Invalid cursor format")
+		}
+
+		// Parse "messageID:timestamp" format
+		var msgID uint64
+		var ts int64
+		_, err = fmt.Sscanf(string(decoded), "%d:%d", &msgID, &ts)
+		if err != nil {
+			return utils.RespondBadRequest(c, "Invalid cursor format")
+		}
+		cursorMessageID = uint(msgID)
+		cursorTimestamp = time.Unix(0, ts) // nanoseconds
+	}
+
+	// Build query based on direction
+	query := config.DB.
+		Preload("User").
+		Preload("ParentMessage.User").
+		Where("room_id = ?", roomID)
+
+	if cursor != "" {
+		if direction == "newer" {
+			// Get messages newer than cursor (created_at > cursor OR (created_at = cursor AND id > cursorID))
+			query = query.Where(
+				"(created_at > ?) OR (created_at = ? AND id > ?)",
+				cursorTimestamp, cursorTimestamp, cursorMessageID,
+			).Order("created_at ASC, id ASC")
+		} else {
+			// Get messages older than cursor (default) (created_at < cursor OR (created_at = cursor AND id < cursorID))
+			query = query.Where(
+				"(created_at < ?) OR (created_at = ? AND id < ?)",
+				cursorTimestamp, cursorTimestamp, cursorMessageID,
+			).Order("created_at DESC, id DESC")
+		}
+	} else {
+		// No cursor - get latest messages
+		query = query.Order("created_at DESC, id DESC")
+	}
+
+	// Fetch one extra to determine if there are more
+	var messages []models.Message
+	if err := query.Limit(limit + 1).Find(&messages).Error; err != nil {
+		return utils.RespondInternalErrorWithLog(c, err, "GetMessages - fetch messages with cursor")
+	}
+
+	// Check if there are more results
+	hasMore := len(messages) > limit
+	if hasMore {
+		messages = messages[:limit] // Remove the extra message
+	}
+
+	// For "newer" direction, reverse to maintain consistent DESC order in response
+	if direction == "newer" {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
+	}
+
+	// Build cursors for navigation
+	var nextCursor, prevCursor string
+
+	if len(messages) > 0 {
+		// For "older" direction (default DESC order):
+		// - next_cursor points to the oldest message (to fetch more older messages)
+		// - prev_cursor points to the newest message (to fetch newer messages)
+		oldestMsg := messages[len(messages)-1]
+		newestMsg := messages[0]
+
+		// next_cursor: fetch older messages (continue scrolling down)
+		if hasMore || direction == "newer" {
+			nextCursor = encodeCursor(oldestMsg.ID, oldestMsg.CreatedAt)
+		}
+
+		// prev_cursor: fetch newer messages (scroll up)
+		if cursor != "" {
+			prevCursor = encodeCursor(newestMsg.ID, newestMsg.CreatedAt)
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"messages": messages,
+		"pagination": fiber.Map{
+			"limit":       limit,
+			"has_more":    hasMore,
+			"next_cursor": nextCursor,
+			"prev_cursor": prevCursor,
+		},
+	})
+}
+
+// encodeCursor creates a Base64-encoded cursor from message ID and timestamp
+func encodeCursor(messageID uint, timestamp time.Time) string {
+	cursorStr := fmt.Sprintf("%d:%d", messageID, timestamp.UnixNano())
+	return base64.StdEncoding.EncodeToString([]byte(cursorStr))
 }
 
 // GetRooms retrieves all rooms the authenticated user is a member of (excluding direct rooms)
