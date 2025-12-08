@@ -17,20 +17,30 @@ const (
 	OnlineThresholdMinutes = 5
 )
 
+// updateUserOnlineStatus calculates and sets the online status based on last_active_at
+func updateUserOnlineStatus(user *models.User) {
+	if user.LastActiveAt != nil {
+		timeSince := time.Since(*user.LastActiveAt)
+		user.IsOnline = timeSince < OnlineThresholdMinutes*time.Minute
+	} else {
+		user.IsOnline = false
+	}
+	if user.IsOnline {
+		user.Status = "online"
+	} else {
+		user.Status = "offline"
+	}
+}
+
 // buildUserAvailableResponse builds a UserAvailableResponse from a user
 // This is extracted to support concurrent processing
 func buildUserAvailableResponse(user models.User, existingDMs map[uint]bool) UserAvailableResponse {
-	// Calculate online status based on last_active_at
-	isOnline := false
-	if user.LastActiveAt != nil {
-		timeSince := time.Since(*user.LastActiveAt)
-		isOnline = timeSince < OnlineThresholdMinutes*time.Minute
-	}
+	updateUserOnlineStatus(&user)
 
 	return UserAvailableResponse{
 		ID:       user.ID,
 		Username: user.Username,
-		IsOnline: isOnline,
+		IsOnline: user.IsOnline,
 		HasDM:    existingDMs[user.ID],
 	}
 }
@@ -58,18 +68,7 @@ func ListUsers(c *fiber.Ctx) error {
 
 	// Calculate online status based on last_active_at
 	for i := range users {
-		if users[i].LastActiveAt != nil {
-			timeSince := time.Since(*users[i].LastActiveAt)
-			users[i].IsOnline = timeSince < OnlineThresholdMinutes*time.Minute
-			if users[i].IsOnline {
-				users[i].Status = "online"
-			} else {
-				users[i].Status = "offline"
-			}
-		} else {
-			users[i].IsOnline = false
-			users[i].Status = "offline"
-		}
+		updateUserOnlineStatus(&users[i])
 	}
 
 	return c.JSON(fiber.Map{
@@ -102,8 +101,8 @@ func GetAvailableUsers(c *fiber.Ctx) error {
 	// Get user IDs that have existing DMs with current user using optimized query
 	var existingDMUserIDs []uint
 	err := config.DB.Raw(`
-		SELECT DISTINCT 
-			CASE 
+		SELECT DISTINCT
+			CASE
 				WHEN rm1.user_id = ? THEN rm2.user_id
 				ELSE rm1.user_id
 			END as other_user_id
@@ -191,18 +190,7 @@ func GetUserById(c *fiber.Ctx) error {
 	}
 
 	// Calculate online status based on last_active_at
-	if user.LastActiveAt != nil {
-		timeSince := time.Since(*user.LastActiveAt)
-		user.IsOnline = timeSince < OnlineThresholdMinutes*time.Minute
-		if user.IsOnline {
-			user.Status = "online"
-		} else {
-			user.Status = "offline"
-		}
-	} else {
-		user.IsOnline = false
-		user.Status = "offline"
-	}
+	updateUserOnlineStatus(&user)
 
 	return c.JSON(fiber.Map{
 		"success": true,
