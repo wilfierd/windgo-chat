@@ -29,6 +29,7 @@ func SetupAuthRoutes(app *fiber.App) {
 
 	// Protected routes (authentication required with activity tracking)
 	auth.Get("/profile", middleware.AuthRequired(), middleware.TrackActivity(), handlers.GetProfile)
+	auth.Put("/profile", middleware.AuthRequired(), middleware.TrackActivity(), handlers.UpdateProfile)
 	auth.Post("/refresh", middleware.AuthRequired(), middleware.TrackActivity(), func(c *fiber.Ctx) error {
 		// Get user ID from middleware
 		userID := c.Locals("userID").(uint)

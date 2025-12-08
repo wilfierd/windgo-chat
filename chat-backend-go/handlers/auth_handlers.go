@@ -159,3 +159,66 @@ func GetProfile(c *fiber.Ctx) error {
 
 	return c.JSON(user)
 }
+
+// UpdateProfileRequest represents the request body for updating user profile
+type UpdateProfileRequest struct {
+	Username string `json:"username"`
+	Bio      string `json:"bio"`
+}
+
+// UpdateProfile updates the current user's profile
+func UpdateProfile(c *fiber.Ctx) error {
+	// Get user ID from JWT middleware (type-safe)
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	var req UpdateProfileRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	var user models.User
+	if err := config.DB.First(&user, userID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	}
+
+	// Update fields if provided
+	updates := make(map[string]interface{})
+	if req.Username != "" && req.Username != user.Username {
+		// Check if username is already taken
+		var existingUser models.User
+		if err := config.DB.Where("username = ? AND id != ?", req.Username, userID).First(&existingUser).Error; err == nil {
+			return c.Status(409).JSON(fiber.Map{
+				"error": "Username is already taken",
+			})
+		}
+		updates["username"] = req.Username
+	}
+	if req.Bio != user.Bio {
+		updates["bio"] = req.Bio
+	}
+
+	if len(updates) > 0 {
+		if err := config.DB.Model(&user).Updates(updates).Error; err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to update profile",
+			})
+		}
+		// Reload user to get updated data
+		config.DB.First(&user, userID)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Profile updated successfully",
+		"data":    user,
+	})
+}

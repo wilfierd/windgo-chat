@@ -14,6 +14,7 @@ type User struct {
 	Email    string `json:"email" gorm:"unique;not null;index:idx_user_email"`
 	Password string `json:"-" gorm:"not null"`
 	Role     string `json:"role" gorm:"not null;default:'user';index:idx_user_role"`
+	Bio      string `json:"bio" gorm:"type:text"`
 	// Social login fields
 	Provider  string `json:"provider" gorm:"index:idx_user_provider"`
 	GitHubID  string `json:"github_id" gorm:"uniqueIndex"`
