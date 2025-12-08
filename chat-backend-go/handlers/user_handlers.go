@@ -166,3 +166,47 @@ func GetAvailableUsers(c *fiber.Ctx) error {
 		"data":    response,
 	})
 }
+
+// GetUserById returns a specific user by ID
+func GetUserById(c *fiber.Ctx) error {
+	// Get user ID from JWT middleware (type-safe)
+	_, ok := middleware.GetUserID(c)
+	if !ok {
+		return utils.RespondUnauthorized(c, "User not authenticated")
+	}
+
+	// Parse user ID from URL params
+	userID, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid user ID",
+		})
+	}
+
+	var user models.User
+	if err := config.DB.First(&user, userID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	}
+
+	// Calculate online status based on last_active_at
+	if user.LastActiveAt != nil {
+		timeSince := time.Since(*user.LastActiveAt)
+		user.IsOnline = timeSince < OnlineThresholdMinutes*time.Minute
+		if user.IsOnline {
+			user.Status = "online"
+		} else {
+			user.Status = "offline"
+		}
+	} else {
+		user.IsOnline = false
+		user.Status = "offline"
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "User retrieved successfully",
+		"data":    user,
+	})
+}
