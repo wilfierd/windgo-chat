@@ -270,10 +270,13 @@ This document tracks the development progress of WindGo Chat, a real-time chat a
   - Room.category field (e.g., "work", "social", "announcements")
   - Filter rooms by category
 
-- [ ] **User profiles** - Enhanced user profiles
+- [x] **User profiles** - Enhanced user profiles ✓
 
-  - Bio, status message, timezone, public key (for secure file transfers)
-  - Endpoint: GET /api/v1/users/:id, PUT /api/v1/users/me
+  - ✅ Bio field added to User model
+  - ✅ Username editing support
+  - ✅ Endpoints: GET /api/auth/profile, PUT /api/auth/profile
+  - ✅ GET /api/v1/users/:id (get user by ID)
+  - [ ] Status message, timezone, public key (for secure file transfers) - future enhancement
 
 - [ ] **Audit logging** - Track admin actions
 

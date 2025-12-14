@@ -16,6 +16,7 @@ Built with Go for the backend. The web frontend has moved to a separate reposito
 - **Real-time messaging**: WebSocket-powered instant message delivery
 - **Chat rooms**: Group chat rooms with admin management
 - **Direct messaging**: Private 1-on-1 conversations
+- **User profiles**: Edit username and bio, view other users' profiles
 - **User mentions**: @username mentions with real-time notifications
 - **Message search**: Full-text search powered by Meilisearch with <100ms response times
 - **Message threading**: Reply to specific messages
@@ -93,3 +94,65 @@ This starts:
 - Adminer (DB admin UI) on port 8081
 
 **Note**: The backend gracefully handles Meilisearch being unavailable - message operations continue normally, but search functionality returns a 503 error.
+
+---
+
+## API Documentation
+
+### User Profile Endpoints
+
+#### Get Current User Profile
+```bash
+GET /api/auth/profile
+Authorization: Bearer <JWT_TOKEN>
+```
+
+**Response:**
+```json
+{
+  "id": 1,
+  "username": "john_doe",
+  "email": "john@example.com",
+  "bio": "Software developer and chat enthusiast",
+  "role": "user",
+  "avatar_url": "https://...",
+  "is_online": true,
+  "status": "online",
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+#### Update User Profile
+```bash
+PUT /api/auth/profile
+Authorization: Bearer <JWT_TOKEN>
+Content-Type: application/json
+
+{
+  "username": "new_username",
+  "bio": "Updated bio text"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Profile updated successfully",
+  "data": {
+    "id": 1,
+    "username": "new_username",
+    "email": "john@example.com",
+    "bio": "Updated bio text",
+    ...
+  }
+}
+```
+
+#### Get User by ID
+```bash
+GET /api/v1/users/:id
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Returns profile information for any user in the system, including their online status.
