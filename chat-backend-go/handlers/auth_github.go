@@ -102,7 +102,17 @@ func GitHubCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 	}
 
-	return c.JSON(AuthResponse{Token: token, User: *user})
+	// Get frontend URL from environment, default to localhost
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+
+	// Redirect to frontend with token in URL fragment (more secure than query param)
+	// Frontend should extract token from URL hash and store it
+	redirectURL := fmt.Sprintf("%s/auth/callback#token=%s", frontendURL, token)
+	log.Printf("GitHub OAuth: Redirecting to frontend: %s", frontendURL+"/auth/callback")
+	return c.Redirect(redirectURL, http.StatusFound)
 }
 
 // fetchGitHubUser retrieves the GitHub user profile and primary verified email.
