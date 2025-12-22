@@ -131,15 +131,20 @@ func VerifyRoomMembership(db *gorm.DB, userID, roomID uint) error {
 
 // GetLastReadMessage - Get the last read message for a user in a room
 func GetLastReadMessage(userID, roomID uint) (*models.UserRoomLastRead, error) {
-	var lastRead models.UserRoomLastRead
+	var lastRead []models.UserRoomLastRead
 	err := config.DB.Where("user_id = ? AND room_id = ?", userID, roomID).
 		Preload("LastReadMessage").
-		First(&lastRead).Error
+		Limit(1).
+		Find(&lastRead).Error
 
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil {
+		return nil, err
+	}
+
+	if len(lastRead) == 0 {
 		return nil, nil // No last read record exists yet
 	}
-	return &lastRead, err
+	return &lastRead[0], nil
 }
 
 // UpdateLastReadMessage - Update or create the last read message for a user in a room

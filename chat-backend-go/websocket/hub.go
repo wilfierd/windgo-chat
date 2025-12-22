@@ -257,42 +257,8 @@ func (h *Hub) GetOnlineUsers() []uint {
 
 // isRoomMember checks if a user is a member of a room
 func (h *Hub) isRoomMember(userID uint, roomID uint) bool {
-	// Check cache first
-	h.mu.RLock()
-	if members, exists := h.membershipCache[roomID]; exists {
-		isMember := members[userID]
-		h.mu.RUnlock()
-		return isMember
-	}
-	h.mu.RUnlock()
-
-	// Query database if not in cache
-	if h.db == nil {
-		log.Printf("Database not available for membership check")
-		return false
-	}
-
-	var count int64
-	err := h.db.Table("room_memberships").
-		Where("user_id = ? AND room_id = ?", userID, roomID).
-		Count(&count).Error
-
-	if err != nil {
-		log.Printf("Error checking room membership: %v", err)
-		return false
-	}
-
-	isMember := count > 0
-
-	// Update cache
-	h.mu.Lock()
-	if _, exists := h.membershipCache[roomID]; !exists {
-		h.membershipCache[roomID] = make(map[uint]bool)
-	}
-	h.membershipCache[roomID][userID] = isMember
-	h.mu.Unlock()
-
-	return isMember
+	members := h.getRoomMembers(roomID)
+	return members[userID]
 }
 
 // getRoomMembers returns all member user IDs for a room
@@ -323,8 +289,8 @@ func (h *Hub) getRoomMembers(roomID uint) map[uint]bool {
 
 	// Build member set
 	members := make(map[uint]bool)
-	for _, userID := range userIDs {
-		members[userID] = true
+	for _, id := range userIDs {
+		members[id] = true
 	}
 
 	// Update cache
