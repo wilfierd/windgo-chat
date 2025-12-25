@@ -16,26 +16,49 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
+          script_stop: true
           script: |
+            set -e
+
             # Navigate to the project directory
             cd ~/app/chat-backend-go || exit 1
-            
+
             # Pull the latest code
             echo "Pulling latest code..."
-            git pull origin main
-            
-            # Ensure Docker Compose V2 is installed
-            echo "Checking Docker Compose version..."
-            if ! docker compose version >/dev/null 2>&1; then
-                echo "Installing Docker Compose V2..."
-                sudo apt-get update
-                sudo apt-get install -y docker-compose-plugin
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Determine which docker compose command to use
+            echo "Checking Docker Compose..."
+            if docker compose version >/dev/null 2>&1; then
+                COMPOSE_CMD="docker compose"
+            elif docker-compose version >/dev/null 2>&1; then
+                COMPOSE_CMD="docker-compose"
+            else
+                echo "ERROR: Neither 'docker compose' nor 'docker-compose' is available"
+                exit 1
             fi
-            
-            # Rebuild and restart containers using Docker Compose V2
-            echo "Rebuilding and restarting containers..."
-            # Use 'docker compose' (V2) instead of 'docker-compose' (V1)
-            docker compose up -d --build backend
-            
+            echo "Using: $COMPOSE_CMD"
+
+            # Rebuild without cache and restart containers
+            echo "Building without cache..."
+            $COMPOSE_CMD build --no-cache backend
+
+            echo "Starting containers..."
+            $COMPOSE_CMD up -d backend
+
+            # Verify container is running
+            echo "Verifying deployment..."
+            sleep 5
+            if docker ps | grep -q backend; then
+                echo "✅ Backend container is running"
+            else
+                echo "❌ Backend container failed to start"
+                docker logs windgo-chat-backend --tail 50 || true
+                exit 1
+            fi
+
             # Clean up unused images
             docker image prune -f
+
+            echo "✅ Deployment completed successfully"
