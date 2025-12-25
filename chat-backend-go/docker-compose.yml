@@ -24,7 +24,7 @@ services:
     image: adminer:latest
     container_name: windgo-chat-adminer
     ports:
-      - "8081:8080"
+      - "8082:8080"
     depends_on:
       - postgres
     restart: unless-stopped

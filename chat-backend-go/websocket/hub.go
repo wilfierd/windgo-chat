@@ -163,6 +163,11 @@ func (h *Hub) broadcastMessage(message *Message) {
 			continue
 		}
 
+		// Don't send typing notifications back to the sender
+		if message.Type == "typing" && client.UserID == message.UserID {
+			continue
+		}
+
 		select {
 		case client.Send <- data:
 		default:
