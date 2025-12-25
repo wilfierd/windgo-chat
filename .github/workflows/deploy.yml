@@ -24,10 +24,18 @@ jobs:
             echo "Pulling latest code..."
             git pull origin main
             
-            # Rebuild and restart containers
-            echo "Rebuilding and restarting containers..."
-            # Build backend specifically to ensure changes are picked up
-            docker-compose up -d --build backend
+            # Ensure Docker Compose V2 is installed
+            echo "Checking Docker Compose version..."
+            if ! docker compose version >/dev/null 2>&1; then
+                echo "Installing Docker Compose V2..."
+                sudo apt-get update
+                sudo apt-get install -y docker-compose-plugin
+            fi
             
-            # Clean up unused images to save space on the small server
+            # Rebuild and restart containers using Docker Compose V2
+            echo "Rebuilding and restarting containers..."
+            # Use 'docker compose' (V2) instead of 'docker-compose' (V1)
+            docker compose up -d --build backend
+            
+            # Clean up unused images
             docker image prune -f
