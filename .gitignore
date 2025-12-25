@@ -95,6 +95,7 @@ out/
 
 # Local development
 .local/
+*pem
 
 # Testing
 test-results/

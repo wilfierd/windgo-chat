@@ -1,0 +1,33 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main  # Trigger on push to main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            # Navigate to the project directory
+            cd ~/app/chat-backend-go || exit 1
+            
+            # Pull the latest code
+            echo "Pulling latest code..."
+            git pull origin main
+            
+            # Rebuild and restart containers
+            echo "Rebuilding and restarting containers..."
+            # Build backend specifically to ensure changes are picked up
+            docker-compose up -d --build backend
+            
+            # Clean up unused images to save space on the small server
+            docker image prune -f

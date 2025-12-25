@@ -1,6 +1,30 @@
 version: "3.8"
 
 services:
+  backend:
+    build: .
+    container_name: windgo-chat-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_NAME=windgo_chat
+      - MEILISEARCH_HOST=http://meilisearch:7700
+      - MEILISEARCH_API_KEY=${MEILISEARCH_API_KEY:-}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - windgo-network
+
   postgres:
     image: postgres:15-alpine
     container_name: windgo-chat-postgres
@@ -19,6 +43,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      - windgo-network
 
   adminer:
     image: adminer:latest
@@ -28,6 +54,8 @@ services:
     depends_on:
       - postgres
     restart: unless-stopped
+    networks:
+      - windgo-network
 
   meilisearch:
     image: getmeili/meilisearch:v1.6
@@ -45,7 +73,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      - windgo-network
 
 volumes:
   postgres_data:
   meilisearch_data:
+
+networks:
+  windgo-network:
+    driver: bridge
