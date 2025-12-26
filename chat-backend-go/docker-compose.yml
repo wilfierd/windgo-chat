@@ -1,35 +1,7 @@
 version: "3.8"
 
+# Dependencies for WindGo Chat (Backend runs on host)
 services:
-  backend:
-    build: .
-    container_name: windgo-chat-backend
-    ports:
-      - "8080:8080"
-    environment:
-      - PORT=8080
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=password
-      - DB_NAME=windgo_chat
-      - MEILISEARCH_HOST=http://meilisearch:7700
-      - MEILISEARCH_API_KEY=${MEILISEARCH_API_KEY:-}
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
-      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
-      - FRONTEND_URL=${FRONTEND_URL:-}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
-      - GITHUB_REDIRECT_URL=${GITHUB_REDIRECT_URL:-}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      meilisearch:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - windgo-network
-
   postgres:
     image: postgres:15-alpine
     container_name: windgo-chat-postgres

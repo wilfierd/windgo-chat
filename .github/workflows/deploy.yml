@@ -28,6 +28,12 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Check if Go is installed
+            if ! command -v go &> /dev/null; then
+                echo "ERROR: Go is not installed on the server."
+                exit 1
+            fi
+
             # Determine which docker compose command to use
             echo "Checking Docker Compose..."
             if docker compose version >/dev/null 2>&1; then
@@ -40,25 +46,28 @@ jobs:
             fi
             echo "Using: $COMPOSE_CMD"
 
-            # Rebuild without cache and restart containers
-            echo "Building without cache..."
-            $COMPOSE_CMD build --no-cache backend
+            # Start dependencies (DB, Search, etc.)
+            echo "Starting dependencies..."
+            $COMPOSE_CMD up -d postgres meilisearch adminer
 
-            echo "Starting containers..."
-            $COMPOSE_CMD up -d backend
+            # Build the Go application
+            echo "Building Go application..."
+            go mod download
+            go build -o main main.go
 
-            # Verify container is running
-            echo "Verifying deployment..."
-            sleep 5
-            if docker ps | grep -q backend; then
-                echo "✅ Backend container is running"
+            # Restart the Systemd service
+            # Assumes the service file 'windgo-backend.service' has been linked/copied to /etc/systemd/system/
+            # and enabled.
+            echo "Restarting backend service..."
+            if sudo systemctl is-active --quiet windgo-backend; then
+                sudo systemctl restart windgo-backend
             else
-                echo "❌ Backend container failed to start"
-                docker logs windgo-chat-backend --tail 50 || true
-                exit 1
+                echo "WARNING: Service 'windgo-backend' is not active. Attempting to start/enable..."
+                # Optional: specific setup if service missing (requires sudo permissions)
+                # sudo cp windgo-backend.service /etc/systemd/system/
+                # sudo systemctl daemon-reload
+                # sudo systemctl enable windgo-backend
+                sudo systemctl start windgo-backend || echo "Failed to start service. Check logs."
             fi
-
-            # Clean up unused images
-            docker image prune -f
 
             echo "✅ Deployment completed successfully"

@@ -1,0 +1,18 @@
+[Unit]
+Description=WindGo Chat Backend
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/app/chat-backend-go
+ExecStart=/home/ubuntu/app/chat-backend-go/main
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/app/chat-backend-go/.env
+# StandardOutput=syslog
+# StandardError=syslog
+# SyslogIdentifier=windgo-backend
+
+[Install]
+WantedBy=multi-user.target
