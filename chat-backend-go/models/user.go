@@ -17,7 +17,7 @@ type User struct {
 	Bio      string `json:"bio" gorm:"type:text"`
 	// Social login fields
 	Provider  string `json:"provider" gorm:"index:idx_user_provider"`
-	GitHubID  string `json:"github_id" gorm:"uniqueIndex"`
+	GitHubID  *string `json:"github_id" gorm:"uniqueIndex"`
 	AvatarURL string `json:"avatar_url"`
 	// Activity tracking
 	LastActiveAt *time.Time     `json:"last_active_at" gorm:"index:idx_user_last_active"`

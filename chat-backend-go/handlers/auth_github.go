@@ -270,7 +270,7 @@ func linkOrCreateUserFromGitHub(ghUser map[string]any, email string) (*models.Us
 		Password:  string(hashed),
 		Role:      "user",
 		Provider:  "github",
-		GitHubID:  ghID,
+		GitHubID:  &ghID,
 		AvatarURL: avatar,
 	}
 	log.Printf("GitHub OAuth: Creating user with username: %s, email: %s, ghID: %s", username, email, ghID)
