@@ -62,18 +62,10 @@ jobs:
             go build -o main main.go
 
             # Restart the Systemd service
-            # Assumes the service file 'windgo-backend.service' has been linked/copied to /etc/systemd/system/
-            # and enabled.
-            echo "Restarting backend service..."
-            if sudo systemctl is-active --quiet windgo-backend; then
-                sudo systemctl restart windgo-backend
-            else
-                echo "WARNING: Service 'windgo-backend' is not active. Attempting to start/enable..."
-                # Optional: specific setup if service missing (requires sudo permissions)
-                # sudo cp windgo-backend.service /etc/systemd/system/
-                # sudo systemctl daemon-reload
-                # sudo systemctl enable windgo-backend
-                sudo systemctl start windgo-backend || echo "Failed to start service. Check logs."
-            fi
+            echo "Setting up and restarting backend service..."
+            sudo cp windgo-backend.service /etc/systemd/system/windgo-backend.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable windgo-backend
+            sudo systemctl restart windgo-backend
 
             echo "✅ Deployment completed successfully"
