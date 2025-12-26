@@ -96,6 +96,7 @@ func SeedDemoRooms() {
 		if err != nil {
 			newRoom := models.Room{
 				Name: roomData.Name,
+				Type: models.RoomTypeGroup,
 			}
 			if err := config.DB.Create(&newRoom).Error; err != nil {
 				log.Printf("Failed to create room %s: %v", roomData.Name, err)
@@ -104,4 +105,49 @@ func SeedDemoRooms() {
 			}
 		}
 	}
+
+	// Add all users to all group rooms
+	SeedRoomMemberships()
+}
+
+// SeedRoomMemberships adds all users to all group rooms
+func SeedRoomMemberships() {
+	var users []models.User
+	var rooms []models.Room
+
+	// Get all users
+	if err := config.DB.Find(&users).Error; err != nil {
+		log.Printf("Failed to fetch users for room memberships: %v", err)
+		return
+	}
+
+	// Get all group rooms
+	if err := config.DB.Where("type = ?", models.RoomTypeGroup).Find(&rooms).Error; err != nil {
+		log.Printf("Failed to fetch rooms for memberships: %v", err)
+		return
+	}
+
+	// Add each user to each room
+	for _, user := range users {
+		for _, room := range rooms {
+			var existing models.RoomMembership
+			err := config.DB.Where("user_id = ? AND room_id = ?", user.ID, room.ID).First(&existing).Error
+			if err != nil {
+				// Membership doesn't exist, create it
+				role := models.RoleMember
+				if user.Role == "admin" {
+					role = models.RoleAdmin
+				}
+				membership := models.RoomMembership{
+					UserID: user.ID,
+					RoomID: room.ID,
+					Role:   role,
+				}
+				if err := config.DB.Create(&membership).Error; err != nil {
+					log.Printf("Failed to add user %s to room %s: %v", user.Username, room.Name, err)
+				}
+			}
+		}
+	}
+	log.Println("Room memberships seeded")
 }
