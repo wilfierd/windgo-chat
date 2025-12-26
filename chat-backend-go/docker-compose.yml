@@ -81,6 +81,18 @@ services:
     networks:
       - windgo-network
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: windgo-cloudflared
+    command: tunnel --protocol http2 run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - windgo-network
+
 volumes:
   postgres_data:
   meilisearch_data:
