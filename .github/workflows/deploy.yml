@@ -28,11 +28,17 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Check if Go is installed
+            # Install/Setup Go
+            echo "Setting up Go..."
+            export PATH=$PATH:/usr/local/go/bin
             if ! command -v go &> /dev/null; then
-                echo "ERROR: Go is not installed on the server."
-                exit 1
+                echo "Go not found. Installing Go 1.24.4..."
+                wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz -O go.tar.gz
+                sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go.tar.gz
+                rm go.tar.gz
+                echo "Go installed."
             fi
+            go version
 
             # Determine which docker compose command to use
             echo "Checking Docker Compose..."
