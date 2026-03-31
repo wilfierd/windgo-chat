@@ -25,7 +25,7 @@ jobs:
       - name: Build Docker Image
         run: |
           set -e
-          cd $PROJECT_DIR/chat-backend-go
+          cd $PROJECT_DIR
 
           echo "Building Docker image $IMAGE_NAME..."
           sudo docker build -t $IMAGE_NAME .
