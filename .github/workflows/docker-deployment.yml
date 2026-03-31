@@ -1,0 +1,54 @@
+name: Docker CI/CD on Self-Hosted
+
+on:
+  push:
+    branches:
+      - dev 
+      
+env:
+  PROJECT_DIR: ${{ vars.PROJECT_DIR }}
+  CONTAINER_NAME: windgo-backend
+  IMAGE_NAME: windgo-backend-image
+
+jobs:
+  deploy-via-docker:
+    name: Build & Deploy via Docker
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Source Code
+        run: |
+          set -e
+          cd $PROJECT_DIR
+          git fetch origin ${{ github.ref_name }}
+          git reset --hard origin/${{ github.ref_name }}
+
+      - name: Build Docker Image
+        run: |
+          set -e
+          cd $PROJECT_DIR/chat-backend-go
+          
+          echo "Building Docker image $IMAGE_NAME..."
+          sudo docker build -t $IMAGE_NAME .
+
+      - name: Stop Old Processes & Restart Container
+        run: |
+          # kill old process
+          sudo fuser -k 8080/tcp || true
+          
+          # rm old container
+          sudo docker stop $CONTAINER_NAME || true
+          sudo docker rm $CONTAINER_NAME || true
+          
+          # run new container
+          sudo docker run -d \
+            --name $CONTAINER_NAME \
+            --network host \
+            --restart unless-stopped \
+            -v $PROJECT_DIR/chat-backend-go/.env:/root/.env \
+            $IMAGE_NAME
+
+      - name: Verify Deployment
+        run: |
+          sleep 3
+          sudo docker logs $CONTAINER_NAME
+        

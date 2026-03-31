@@ -1,8 +1,6 @@
 name: CI/CD on Self-Hosted Runner
 on:
-  push:
-    branches:
-      - dev 
+  workflow_dispatch: # Chỉ chạy khi bấm nút "Run workflow" trên Github
       
 env:
   PROJECT_DIR: ${{ vars.PROJECT_DIR }}
