@@ -44,7 +44,7 @@ jobs:
             --name $CONTAINER_NAME \
             --network host \
             --restart unless-stopped \
-            -v $PROJECT_DIR/chat-backend-go/.env:/root/.env \
+            -v $PROJECT_DIR/.env:/root/.env \
             $IMAGE_NAME
 
       - name: Verify Deployment
