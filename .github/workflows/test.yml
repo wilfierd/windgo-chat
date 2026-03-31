@@ -1,4 +1,4 @@
-name: Deploy on Self-Hosted Runner
+name: CI/CD on Self-Hosted Runner
 on:
   push:
     branches:
@@ -57,15 +57,14 @@ jobs:
     runs-on: self-hosted
     needs: build 
     steps:
-      - name: Restart service
+      - name: Secure Deploy
         run: |
-          set -e
-          cd $PROJECT_DIR
+          sudo cp windgo-backend-new /opt/windgo/windgo-backend
+          sudo chown nguyenhieu:nguyenhieu /opt/windgo/windgo-backend
+          sudo chmod +x /opt/windgo/windgo-backend
           
-          pkill -x windgo-backend || true
+          sudo fuser -k 8080/tcp || true
           
-          mv windgo-backend-new windgo-backend
-          chmod -x windgo-backend
-          
+          sudo -u nguyenhieu bash -c "cd /opt/windgo; RUNNER_TRACKING_ID='' nohup ./windgo-backend > app.log 2>&1 &"
           sleep 3
           cat app.log
