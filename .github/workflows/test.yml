@@ -65,7 +65,7 @@ jobs:
           pkill -x windgo-backend || true
           
           mv windgo-backend-new windgo-backend
-          chmode - windgo-backend
+          chmode -x windgo-backend
           
           sleep 3
           cat app.log
