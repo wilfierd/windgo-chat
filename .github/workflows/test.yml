@@ -1,31 +1,55 @@
 name: Deploy on Self-Hosted Runner
-
 on:
   push:
     branches:
       - dev 
+      
+env:
+  PROJECT_DIR: ${{ vars.PROJECT_DIR }}
 
 jobs:
-  deploy:
+  test:
+    name: Test Code
     runs-on: self-hosted
     steps:
-      - name: Deploy Backend
-        env:
-          PROJECT_DIR: ${{ vars.PROJECT_DIR }}
+      - name: Fetch repository and test
         run: |
           set -e
           cd $PROJECT_DIR
-
           git fetch origin dev
           git reset --hard origin/dev
-
-          pkill -f ./windgo-backend || true
-
+          
           export PATH=$PATH:/usr/local/go/bin
           go mod tidy
-          go build -o windgo-backend main.go
+          go test ./...
 
+  build:
+    name: Build Binary
+    runs-on: self-hosted
+    needs: test 
+    steps:
+      - name: Build executable
+        run: |
+          set -e
+          cd $PROJECT_DIR
+          export PATH=$PATH:/usr/local/go/bin
+          go build -o windgo-backend-new main.go
+
+  deploy:
+    name: Deploy Backend
+    runs-on: self-hosted
+    needs: build 
+    steps:
+      - name: Restart service
+        run: |
+          set -e
+          cd $PROJECT_DIR
+          
+          pkill -x windgo-backend || true
+          
+          mv windgo-backend-new windgo-backend
+          chmod +x windgo-backend
+          
           RUNNER_TRACKING_ID="" nohup ./windgo-backend > app.log 2>&1 &
           sleep 3
-
           cat app.log
