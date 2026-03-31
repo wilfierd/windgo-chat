@@ -65,7 +65,7 @@ jobs:
           pkill -x windgo-backend || true
           
           mv windgo-backend-new windgo-backend
-         # chmode +x windgo-backend  
+         
           
           RUNNER_TRACKING_ID="" nohup ./windgo-backend > app.log 2>&1 &
           sleep 3
