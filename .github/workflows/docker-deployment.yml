@@ -3,8 +3,8 @@ name: Docker CI/CD on Self-Hosted
 on:
   push:
     branches:
-      - dev 
-      
+      - dev
+
 env:
   PROJECT_DIR: ${{ vars.PROJECT_DIR }}
   CONTAINER_NAME: windgo-backend
@@ -19,14 +19,14 @@ jobs:
         run: |
           set -e
           cd $PROJECT_DIR
-          git fetch origin ${{ github.ref_name }}
-          git reset --hard origin/${{ github.ref_name }}
+          git fetch origin dev
+          git reset --hard origin/dev
 
       - name: Build Docker Image
         run: |
           set -e
           cd $PROJECT_DIR/chat-backend-go
-          
+
           echo "Building Docker image $IMAGE_NAME..."
           sudo docker build -t $IMAGE_NAME .
 
@@ -34,11 +34,11 @@ jobs:
         run: |
           # kill old process
           sudo fuser -k 8080/tcp || true
-          
+
           # rm old container
           sudo docker stop $CONTAINER_NAME || true
           sudo docker rm $CONTAINER_NAME || true
-          
+
           # run new container
           sudo docker run -d \
             --name $CONTAINER_NAME \
@@ -51,4 +51,3 @@ jobs:
         run: |
           sleep 3
           sudo docker logs $CONTAINER_NAME
-        
