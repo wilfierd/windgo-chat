@@ -1,44 +1,66 @@
 name: Docker CI/CD on Self-Hosted
-
 on:
   push:
     branches:
-      - dev
-
+      - dev 
+      
 env:
   PROJECT_DIR: ${{ vars.PROJECT_DIR }}
   CONTAINER_NAME: windgo-backend
   IMAGE_NAME: windgo-backend-image
 
 jobs:
-  deploy-via-docker:
-    name: Build & Deploy via Docker
+  test:
+    name: Test Code
     runs-on: self-hosted
     steps:
       - name: Checkout Source Code
         run: |
           set -e
-          cd $PROJECT_DIR
+          cd $PROJECT_DIR 
           git fetch origin dev
           git reset --hard origin/dev
 
+      - name: Validate Code Structure (go vet)
+        run: |
+          set -e
+          cd $PROJECT_DIR
+          export PATH=$PATH:/usr/local/go/bin
+          go mod tidy
+          go vet ./...
+
+      - name: Run Unit Tests
+        run: |
+          set -e
+          cd $PROJECT_DIR
+          export PATH=$PATH:/usr/local/go/bin
+          go test ./...
+
+  build:
+    name: Build Docker Image
+    runs-on: self-hosted
+    needs: test 
+    steps:
       - name: Build Docker Image
         run: |
           set -e
           cd $PROJECT_DIR
-
+          
           echo "Building Docker image $IMAGE_NAME..."
           sudo docker build -t $IMAGE_NAME .
 
+  deploy:
+    name: Deploy via Docker
+    runs-on: self-hosted
+    needs: build 
+    steps:
       - name: Stop Old Processes & Restart Container
         run: |
-          # kill old process
-          sudo fuser -k 8080/tcp || true
-
+          
           # rm old container
           sudo docker stop $CONTAINER_NAME || true
           sudo docker rm $CONTAINER_NAME || true
-
+          
           # run new container
           sudo docker run -d \
             --name $CONTAINER_NAME \
