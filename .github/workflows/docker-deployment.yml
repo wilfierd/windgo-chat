@@ -84,7 +84,7 @@ jobs:
             --name "$CONTAINER_NAME" \
             --network host \
             --restart unless-stopped \
-            --env-file /opt/windgo/env/backend-dev.env \
+            --env-file /opt/windgo/.env \
             "${IMAGE_NAME}:${SHORT_SHA}"
 
       - name: Verify Deployment
