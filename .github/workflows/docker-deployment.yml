@@ -2,8 +2,8 @@ name: Docker CI/CD on Self-Hosted
 on:
   push:
     branches:
-      - dev 
-      
+      - dev
+
 env:
   PROJECT_DIR: ${{ vars.PROJECT_DIR }}
   CONTAINER_NAME: windgo-backend
@@ -17,59 +17,81 @@ jobs:
       - name: Checkout Source Code
         run: |
           set -e
-          cd $PROJECT_DIR 
+          cd "$PROJECT_DIR"
           git fetch origin dev
           git reset --hard origin/dev
 
       - name: Validate Code Structure (go vet)
         run: |
           set -e
-          cd $PROJECT_DIR
-          export PATH=$PATH:/usr/local/go/bin
+          cd "$PROJECT_DIR"
+          export PATH="$PATH:/usr/local/go/bin"
           go mod tidy
           go vet ./...
 
       - name: Run Unit Tests
         run: |
           set -e
-          cd $PROJECT_DIR
-          export PATH=$PATH:/usr/local/go/bin
+          cd "$PROJECT_DIR"
+          export PATH="$PATH:/usr/local/go/bin"
           go test ./...
 
   build:
     name: Build Docker Image
     runs-on: self-hosted
-    needs: test 
+    needs: test
+    outputs:
+      short_sha: ${{ steps.meta.outputs.short_sha }}
     steps:
-      - name: Build Docker Image
+      - name: Prepare Docker tags
+        id: meta
         run: |
           set -e
-          cd $PROJECT_DIR
-          
-          echo "Building Docker image $IMAGE_NAME..."
-          sudo docker build -t $IMAGE_NAME .
+          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Using tags: ${SHORT_SHA}, latest"
+
+      - name: Build and tag Docker image
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          SHORT_SHA="${{ steps.meta.outputs.short_sha }}"
+
+          echo "Building Docker image ${IMAGE_NAME}:${SHORT_SHA}..."
+          sudo docker build -t "${IMAGE_NAME}:${SHORT_SHA}" .
+
+          echo "Tagging ${IMAGE_NAME}:latest..."
+          sudo docker tag "${IMAGE_NAME}:${SHORT_SHA}" "${IMAGE_NAME}:latest"
 
   deploy:
     name: Deploy via Docker
     runs-on: self-hosted
-    needs: build 
+    needs: build
     steps:
       - name: Stop Old Processes & Restart Container
         run: |
-          
-          # rm old container
-          sudo docker stop $CONTAINER_NAME || true
-          sudo docker rm $CONTAINER_NAME || true
-          
-          # run new container
+          set -e
+          sudo docker stop "$CONTAINER_NAME" || true
+          sudo docker rm "$CONTAINER_NAME" || true
+
+      - name: Run new container with immutable tag
+        run: |
+          set -e
+          SHORT_SHA="${{ needs.build.outputs.short_sha }}"
+
           sudo docker run -d \
-            --name $CONTAINER_NAME \
+            --name "$CONTAINER_NAME" \
             --network host \
             --restart unless-stopped \
-            -v $PROJECT_DIR/.env:/root/.env \
-            $IMAGE_NAME
+            --env-file /opt/windgo/env/backend-dev.env \
+            "${IMAGE_NAME}:${SHORT_SHA}"
 
       - name: Verify Deployment
         run: |
+          set -e
           sleep 3
-          sudo docker logs $CONTAINER_NAME
+          sudo docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" | grep -q running
+          curl -fsS http://127.0.0.1:8080/health > /dev/null || curl -fsS http://127.0.0.1:8080/ping > /dev/null
+          sudo docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+          sudo docker logs --tail 200 "$CONTAINER_NAME"
