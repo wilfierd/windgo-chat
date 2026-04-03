@@ -1,4 +1,5 @@
 name: Docker CI/CD on Self-Hosted
+
 on:
   push:
     branches:
@@ -69,7 +70,7 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
-      - name: Stop Old Processes & Restart Container
+      - name: Stop old container
         run: |
           set -e
           sudo docker stop "$CONTAINER_NAME" || true
@@ -87,11 +88,34 @@ jobs:
             --env-file /opt/windgo/.env \
             "${IMAGE_NAME}:${SHORT_SHA}"
 
-      - name: Verify Deployment
+      - name: Wait for healthy container status
         run: |
           set -e
-          sleep 3
-          sudo docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" | grep -q running
-          curl -fsS http://127.0.0.1:8080/health > /dev/null || curl -fsS http://127.0.0.1:8080/ping > /dev/null
+
+          for i in $(seq 1 30); do
+            STATUS="$(sudo docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$CONTAINER_NAME")"
+            echo "Attempt $i/30 - health status: $STATUS"
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Container is healthy."
+              exit 0
+            fi
+
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "Container became unhealthy."
+              break
+            fi
+
+            sleep 3
+          done
+
+          echo "Container did not become healthy in time."
           sudo docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
-          sudo docker logs --tail 200 "$CONTAINER_NAME"
+          sudo docker logs --tail 300 "$CONTAINER_NAME" || true
+          exit 1
+
+      - name: Verify deployment info
+        run: |
+          set -e
+          sudo docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+          sudo docker logs --tail 100 "$CONTAINER_NAME"

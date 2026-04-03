@@ -24,4 +24,7 @@ COPY --from=builder /app/main .
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 --start-period=15s \
+  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+
 CMD ["./main"]
