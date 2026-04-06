@@ -99,7 +99,7 @@ jobs:
           cd "$PROJECT_DIR"
           
           # Dùng cờ -f để chắc chắn gọi đúng file docker-compose.yml trong thư mục con
-          sudo docker-compose -f chat-backend-go/docker-compose.yml up -d --no-build --scale windgo-backend=3
+          sudo docker-compose -f chat-backend-go/docker-compose.yml up --no-build --scale windgo-backend=3
 
       - name: Wait for healthy container status
         run: |
