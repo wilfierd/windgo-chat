@@ -95,11 +95,12 @@ jobs:
           # 1. Server kéo thẻ Image mới nhất y như cũ!
           sudo docker pull "$IMAGE"
           
-          # 2. Xóa cd cũ, trỏ thẳng vào đúng lõi Project Git
+          # 2. Trỏ thẳng vào đúng lõi Project Git
           cd "$PROJECT_DIR"
           
-          # Không dùng cờ -f nữa, để cho Docker tự đọc thẻ hiện tại
-          sudo docker-compose up -d --no-build --scale windgo-backend=3
+          # Export IMAGE để docker-compose đọc được biến ${IMAGE} trong file yml
+          export IMAGE="$IMAGE"
+          sudo -E docker-compose up -d
 
       - name: Wait for healthy container status
         run: |

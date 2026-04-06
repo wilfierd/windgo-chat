@@ -54,8 +54,7 @@ services:
       - windgo-network
 
   windgo-backend:
-    image: ${DOCKERHUB_USERNAME:-nguyenhieu}/windgo-backend:latest
-    build: .
+    image: ${IMAGE}
     env_file:
       - /opt/windgo/.env
     environment:
