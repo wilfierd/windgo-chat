@@ -98,8 +98,8 @@ jobs:
           # 2. Chuyển vào đúng thư mục chứa file yml
           cd "$PROJECT_DIR"
           
-          # Dùng docker-compose (có dấu gạch ngang) cho các server bản cũ thay vì docker compose v2
-          sudo docker-compose up -d --no-build --scale windgo-backend=3
+          # Dùng cờ -f để chắc chắn gọi đúng file docker-compose.yml trong thư mục con
+          sudo docker-compose -f chat-backend-go/docker-compose.yml up -d --no-build --scale windgo-backend=3
 
       - name: Wait for healthy container status
         run: |
