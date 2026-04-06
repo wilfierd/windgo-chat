@@ -96,7 +96,7 @@ jobs:
           sudo docker pull "$IMAGE"
           
           # 2. Deploy bằng compose thay vì docker run để nó nhận lệnh scale=3
-          cd /opt/windgo/chat-backend-go
+          cd "$PROJECT_DIR"
           sudo docker compose up -d --no-build --scale windgo-backend=3
 
       - name: Wait for healthy container status
