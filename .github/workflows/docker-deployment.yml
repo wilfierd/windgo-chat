@@ -100,6 +100,11 @@ jobs:
           
           # Export IMAGE để docker-compose đọc được biến ${IMAGE} trong file yml
           export IMAGE="$IMAGE"
+          
+          # Dọn sạch toàn bộ container cũ (kể cả từ lần chạy compose trước)
+          sudo -E docker-compose down --remove-orphans || true
+          
+          # Kéo lên 3 instance mới
           sudo -E docker-compose up -d
 
       - name: Wait for healthy container status
