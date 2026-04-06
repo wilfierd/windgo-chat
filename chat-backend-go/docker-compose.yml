@@ -66,7 +66,7 @@ services:
       - MEILISEARCH_HOST=http://meilisearch:7700
       - CORS_ORIGIN=*
     ports:
-      - "8080-8082:8080" # Map 3 containers to 8080, 8081, 8082
+      - "8085-8087:8080" # 3 backend instances: 8085, 8086, 8087 (tránh 8082 của Adminer)
     depends_on:
       - postgres
     deploy:
