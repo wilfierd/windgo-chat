@@ -69,8 +69,7 @@ services:
     ports:
       - "8080-8082:8080" # Map 3 containers to 8080, 8081, 8082
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     deploy:
       replicas: 3
     networks:
