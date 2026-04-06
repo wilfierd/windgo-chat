@@ -95,9 +95,11 @@ jobs:
           # 1. Server kéo thẻ Image mới nhất y như cũ!
           sudo docker pull "$IMAGE"
           
-          # 2. Deploy bằng compose thay vì docker run để nó nhận lệnh scale=3
+          # 2. Chuyển vào đúng thư mục chứa file yml
           cd "$PROJECT_DIR"
-          sudo docker compose up -d --no-build --scale windgo-backend=3
+          
+          # Dùng docker-compose (có dấu gạch ngang) cho các server bản cũ thay vì docker compose v2
+          sudo docker-compose up -d --no-build --scale windgo-backend=3
 
       - name: Wait for healthy container status
         run: |
