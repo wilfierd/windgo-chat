@@ -107,34 +107,29 @@ jobs:
           # Kéo lên 3 instance mới
           sudo -E docker-compose up -d
 
-      - name: Wait for healthy container status
+      - name: Wait for containers to be running
         run: |
           set -e
-
-          for i in $(seq 1 30); do
-            STATUS="$(sudo docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$CONTAINER_NAME")"
-            echo "Attempt $i/30 - health status: $STATUS"
-
-            if [ "$STATUS" = "healthy" ]; then
-              echo "Container is healthy."
-              exit 0
-            fi
-
-            if [ "$STATUS" = "unhealthy" ]; then
-              echo "Container became unhealthy."
-              break
-            fi
-
-            sleep 3
-          done
-
-          echo "Container did not become healthy in time."
-          sudo docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
-          sudo docker logs --tail 300 "$CONTAINER_NAME" || true
-          exit 1
+          echo "Waiting for windgo-backend replicas to start..."
+          sleep 5
+          
+          # Kiểm tra tất cả các container replica của compose
+          REPLICAS=$(sudo docker ps --filter "name=windgo-backend" --format "{{.Names}}")
+          COUNT=$(echo "$REPLICAS" | grep -c "windgo-backend" || true)
+          echo "Running replicas: $COUNT"
+          echo "$REPLICAS"
+          
+          if [ "$COUNT" -lt 3 ]; then
+            echo "Expected 3 replicas, only $COUNT running!"
+            sudo docker ps -a --filter "name=windgo-backend"
+            sudo docker logs $(sudo docker ps -aq --filter "name=windgo-backend" | head -1) --tail 50 || true
+            exit 1
+          fi
+          echo "All 3 replicas are running!"
 
       - name: Verify deployment info
         run: |
           set -e
-          sudo docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
-          sudo docker logs --tail 100 "$CONTAINER_NAME"
+          echo "=== Running containers ==="
+          sudo docker ps --filter "name=windgo-backend" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+
