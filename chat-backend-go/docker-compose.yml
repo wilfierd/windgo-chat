@@ -53,6 +53,29 @@ services:
     networks:
       - windgo-network
 
+  windgo-backend:
+    image: ${DOCKERHUB_USERNAME:-nguyenhieu}/windgo-backend:latest
+    build: .
+    env_file:
+      - /opt/windgo/.env
+    environment:
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_NAME=windgo_chat
+      - DB_PORT=5432
+      - MEILISEARCH_HOST=http://meilisearch:7700
+      - CORS_ORIGIN=*
+    ports:
+      - "8080-8082:8080" # Map 3 containers to 8080, 8081, 8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      replicas: 3
+    networks:
+      - windgo-network
+
 volumes:
   postgres_data:
   meilisearch_data:

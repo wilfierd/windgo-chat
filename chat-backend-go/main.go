@@ -78,16 +78,20 @@ func main() {
 
 	// Basic route
 	app.Get("/", func(c *fiber.Ctx) error {
+		hostname, _ := os.Hostname()
 		return c.JSON(fiber.Map{
 			"message": "WindGo Chat API is running!",
+			"server":  hostname,
 		})
 	})
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
+		hostname, _ := os.Hostname()
 		return c.JSON(fiber.Map{
 			"status":   "healthy",
 			"database": "connected",
+			"server":   hostname,
 		})
 	})
 
