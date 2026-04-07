@@ -133,3 +133,38 @@ jobs:
           echo "=== Running containers ==="
           sudo docker ps --filter "name=windgo-backend" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 
+      - name: Cập nhật Tag ổn định sau deploy thành công
+        run: |
+          NEW_TAG="${{ secrets.DOCKERHUB_USERNAME }}/windgo-backend:latest"
+          echo "$NEW_TAG" > /opt/windgo/last_stable_tag
+          echo "[OK] Stable tag updated: $NEW_TAG"
+
+      - name: "[AUTO ROLLBACK] Khoi phuc phien ban on dinh khi deploy that bai"
+        if: failure()
+        run: |
+          STABLE_TAG_FILE="/opt/windgo/last_stable_tag"
+          
+          if [ ! -f "$STABLE_TAG_FILE" ]; then
+            echo "[WARNING] Khong tim thay tag on dinh de rollback!"
+            exit 1
+          fi
+          
+          ROLLBACK_IMAGE=$(cat "$STABLE_TAG_FILE")
+          echo "[ROLLBACK] Deploy that bai! Dang rollback ve: $ROLLBACK_IMAGE"
+          
+          sudo docker pull "$ROLLBACK_IMAGE"
+          
+          cd "$PROJECT_DIR"
+          export IMAGE="$ROLLBACK_IMAGE"
+          sudo -E docker-compose down --remove-orphans || true
+          sudo -E docker-compose up -d
+          
+          sleep 5
+          COUNT=$(sudo docker ps --filter "name=windgo-backend" --format "{{.Names}}" | grep -c "windgo-backend" || true)
+          
+          if [ "$COUNT" -ge 1 ]; then
+            echo "[OK] Rollback thanh cong! $COUNT replica dang chay voi image: $ROLLBACK_IMAGE"
+          else
+            echo "[FAIL] Rollback cung that bai! Can kiem tra thu cong ngay!"
+            exit 1
+          fi
