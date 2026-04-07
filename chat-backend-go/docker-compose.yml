@@ -43,7 +43,8 @@ services:
     volumes:
       - postgres_slave1_data:/bitnami/postgresql
     depends_on:
-      - postgres-master
+      postgres-master:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - windgo-network
@@ -64,7 +65,8 @@ services:
     volumes:
       - postgres_slave2_data:/bitnami/postgresql
     depends_on:
-      - postgres-master
+      postgres-master:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - windgo-network
@@ -78,7 +80,8 @@ services:
     ports:
       - "8082:8080"
     depends_on:
-      - postgres-master
+      postgres-master:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - windgo-network
@@ -115,7 +118,8 @@ services:
     ports:
       - "8085-8087:8080"
     depends_on:
-      - postgres-master
+      postgres-master:
+        condition: service_healthy
     deploy:
       replicas: 3
     networks:
