@@ -135,7 +135,9 @@ jobs:
 
       - name: Cập nhật Tag ổn định sau deploy thành công
         run: |
-          NEW_TAG="${{ secrets.DOCKERHUB_USERNAME }}/windgo-backend:latest"
+          # Lưu SHA tag cụ thể, không dùng latest vì latest luôn bị ghi đè
+          NEW_TAG="${{ secrets.DOCKERHUB_USERNAME }}/windgo-backend:${{ needs.docker.outputs.image_sha_tag }}"
+          mkdir -p /opt/windgo
           echo "$NEW_TAG" > /opt/windgo/last_stable_tag
           echo "[OK] Stable tag updated: $NEW_TAG"
 
