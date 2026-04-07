@@ -78,16 +78,35 @@ func main() {
 
 	// Basic route
 	app.Get("/", func(c *fiber.Ctx) error {
+		hostname, _ := os.Hostname()
 		return c.JSON(fiber.Map{
 			"message": "WindGo Chat API is running!",
+			"server":  hostname,
 		})
 	})
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
+		hostname, _ := os.Hostname()
 		return c.JSON(fiber.Map{
 			"status":   "healthy",
 			"database": "connected",
+			"server":   hostname,
+		})
+	})
+
+	// Lab: Endpoint giả lập tác vụ nặng (CPU-bound) để test load balancing
+	app.Get("/stress", func(c *fiber.Ctx) error {
+		hostname, _ := os.Hostname()
+		// Giả lập tính toán nặng: tính tổng 10 triệu số
+		sum := 0
+		for i := 0; i < 10_000_000; i++ {
+			sum += i
+		}
+		return c.JSON(fiber.Map{
+			"server": hostname,
+			"result": sum,
+			"msg":    "heavy computation done",
 		})
 	})
 

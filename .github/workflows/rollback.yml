@@ -1,0 +1,69 @@
+name: Manual Rollback
+
+on:
+  workflow_dispatch:
+    branches:
+      - dev
+      - main
+    inputs:
+      image_tag:
+        description: |
+          Tag Docker Hub để rollback (VD: sha-7a8b9c).
+          Để trống = tự động dùng Last Stable Tag trên server.
+        required: false
+        default: ''
+
+env:
+  PROJECT_DIR: ${{ vars.PROJECT_DIR }}
+
+jobs:
+  rollback:
+    name: Rollback về phiên bản ổn định
+    runs-on: self-hosted
+    steps:
+      - name: Xác định Image cần rollback
+        id: resolve
+        run: |
+          STABLE_TAG_FILE="/opt/windgo/last_stable_tag"
+          INPUT_TAG="${{ github.event.inputs.image_tag }}"
+
+          if [ -n "$INPUT_TAG" ]; then
+            # Người dùng nhập tag thủ công
+            IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/windgo-backend:$INPUT_TAG"
+            echo "[Manual] Rollback to: $IMAGE"
+          elif [ -f "$STABLE_TAG_FILE" ]; then
+            # Tự động đọc tag ổn định cuối cùng
+            IMAGE=$(cat "$STABLE_TAG_FILE")
+            echo "[Auto] Rollback to last stable: $IMAGE"
+          else
+            echo "[ERROR] Khong tim thay tag de rollback! Hay nhap tag thu cong."
+            exit 1
+          fi
+
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Pull và Deploy phiên bản rollback
+        run: |
+          set -e
+          IMAGE="${{ steps.resolve.outputs.image }}"
+          echo "[Pull] Pulling: $IMAGE"
+          sudo docker pull "$IMAGE"
+
+          cd "$PROJECT_DIR"
+          export IMAGE="$IMAGE"
+          sudo -E docker-compose down --remove-orphans || true
+          sudo -E docker-compose up -d
+
+      - name: Kiểm tra kết quả Rollback
+        run: |
+          sleep 5
+          COUNT=$(sudo docker ps --filter "name=windgo-backend" --format "{{.Names}}" | grep -c "windgo-backend" || true)
+          echo "=== Trạng thái sau Rollback ==="
+          sudo docker ps --filter "name=windgo-backend" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+
+          if [ "$COUNT" -ge 1 ]; then
+            echo "[OK] Rollback thanh cong! $COUNT replica dang hoat dong."
+          else
+            echo "[FAIL] Rollback fail!"
+            exit 1
+          fi

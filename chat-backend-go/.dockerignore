@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+.github
+
+# Build artifacts (binary files)
+chat-backend-go
+windgo-backend
+windgo-backend-new
+
+# Docs
+*.md
+MENTION_NOTIFICATIONS_IMPLEMENTATION.md
+
+# Tests
+tests/
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Docker files
+Dockerfile
+.dockerignore
+docker-compose.yml
+*.service
