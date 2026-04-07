@@ -1,35 +1,84 @@
 version: "3.7"
 
-# Dependencies for WindGo Chat (Backend runs on host)
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: windgo-chat-postgres
+  # =========================================================
+  # DATABASE: 1 Master + 2 Slave (PostgreSQL Streaming Replication)
+  # =========================================================
+  postgres-master:
+    image: bitnami/postgresql:15
+    container_name: windgo-postgres-master
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: windgo_chat
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: replicatorpass
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: password
+      POSTGRESQL_DATABASE: windgo_chat
     ports:
-      - "5432:5432"
+      - "5432:5432"   # App backend kết nối vào đây để GHI
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_master_data:/bitnami/postgresql
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d windgo_chat"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
     networks:
       - windgo-network
 
+  postgres-slave1:
+    image: bitnami/postgresql:15
+    container_name: windgo-postgres-slave1
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_MASTER_HOST: postgres-master
+      POSTGRESQL_MASTER_PORT_NUMBER: 5432
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: replicatorpass
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: password
+    ports:
+      - "5433:5432"   # Slave 1 - dùng để đọc (READ)
+    volumes:
+      - postgres_slave1_data:/bitnami/postgresql
+    depends_on:
+      - postgres-master
+    restart: unless-stopped
+    networks:
+      - windgo-network
+
+  postgres-slave2:
+    image: bitnami/postgresql:15
+    container_name: windgo-postgres-slave2
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_MASTER_HOST: postgres-master
+      POSTGRESQL_MASTER_PORT_NUMBER: 5432
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: replicatorpass
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: password
+    ports:
+      - "5434:5432"   # Slave 2 - dùng để đọc (READ)
+    volumes:
+      - postgres_slave2_data:/bitnami/postgresql
+    depends_on:
+      - postgres-master
+    restart: unless-stopped
+    networks:
+      - windgo-network
+
+  # =========================================================
+  # TOOLS
+  # =========================================================
   adminer:
     image: adminer:latest
     container_name: windgo-chat-adminer
     ports:
       - "8082:8080"
     depends_on:
-      - postgres
+      - postgres-master
     restart: unless-stopped
     networks:
       - windgo-network
@@ -45,20 +94,18 @@ services:
     volumes:
       - meilisearch_data:/meili_data
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
     networks:
       - windgo-network
 
+  # =========================================================
+  # BACKEND: 3 instances (Load Balanced by Nginx)
+  # =========================================================
   windgo-backend:
     image: ${IMAGE}
     env_file:
       - /opt/windgo/.env
     environment:
-      - DB_HOST=postgres
+      - DB_HOST=postgres-master   # Luôn GHI vào Master
       - DB_USER=postgres
       - DB_PASSWORD=password
       - DB_NAME=windgo_chat
@@ -66,16 +113,18 @@ services:
       - MEILISEARCH_HOST=http://meilisearch:7700
       - CORS_ORIGIN=*
     ports:
-      - "8085-8087:8080" # 3 backend instances: 8085, 8086, 8087 (tránh 8082 của Adminer)
+      - "8085-8087:8080"
     depends_on:
-      - postgres
+      - postgres-master
     deploy:
       replicas: 3
     networks:
       - windgo-network
 
 volumes:
-  postgres_data:
+  postgres_master_data:
+  postgres_slave1_data:
+  postgres_slave2_data:
   meilisearch_data:
 
 networks:

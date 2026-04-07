@@ -95,6 +95,21 @@ func main() {
 		})
 	})
 
+	// Lab: Endpoint giả lập tác vụ nặng (CPU-bound) để test load balancing
+	app.Get("/stress", func(c *fiber.Ctx) error {
+		hostname, _ := os.Hostname()
+		// Giả lập tính toán nặng: tính tổng 10 triệu số
+		sum := 0
+		for i := 0; i < 10_000_000; i++ {
+			sum += i
+		}
+		return c.JSON(fiber.Map{
+			"server": hostname,
+			"result": sum,
+			"msg":    "heavy computation done",
+		})
+	})
+
 	// Setup routes
 	routes.SetupAuthRoutes(app)
 	routes.UserRoutes(app)
